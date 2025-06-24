@@ -1,0 +1,5 @@
+nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/api/database']
+INFO:     Uvicorn running on http://0.0.0.0:8010 (Press CTRL+C to quit)
+INFO:     Started reloader process [3415239] using StatReload
+ERROR:    Error loading ASGI app. Could not import module "ws_main".

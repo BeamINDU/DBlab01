@@ -1,0 +1,27 @@
+nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/api']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [2132715] using StatReload
+INFO:     Started server process [2132717]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:34062 - "PUT /update_prodtype?prodtypeid=M0001 HTTP/1.1" 422 Unprocessable Entity
+WARNING:  StatReload detected changes in 'database/schemas.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2132717]
+INFO:     Started server process [2134344]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:47492 - "PUT /update_prodtype?prodtypeid=M0001 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:49296 - "PUT /update_prodtype?prodtypeid=M0001 HTTP/1.1" 422 Unprocessable Entity
+WARNING:  StatReload detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2134344]
+INFO:     Started server process [2135483]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:59196 - "PUT /update_prodtype?prodtypeid=M0001 HTTP/1.1" 200 OK
