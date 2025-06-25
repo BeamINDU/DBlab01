@@ -6,7 +6,7 @@ from sqlalchemy.sql import text
 from sqlalchemy.orm import Session
 from database.connect_to_db import Session
 from database.user import UserDB, UserService
-from database.product import ProductDB, ProductService
+from database.product import ProductDB, ProductService, ProductTypeService
 from database.connect_to_db import test_db_connection, SessionLocal
 import database.schemas as schemas
 from database.defect import DefectDB
@@ -34,14 +34,15 @@ app = FastAPI(
         {"name": "User", "description": "User management"},
         {"name": "Role", "description": "Role management"},
         {"name": "Product", "description": "Product management"},
-        {"name": "ProdType", "description": "Product type management"},
+        {"name": "ProductType", "description": "Product type management"},
         {"name": "Menu", "description": "Menu management"},
         {"name": "Camera", "description": "Camera configuration"},
-        {"name": "Defect", "description": "Defect types"},
+        {"name": "DefectType", "description": "Defect types"},
         {"name": "Planning", "description": "Production planning"},
         {"name": "Model", "description": "Detection model registry"},
         {"name": "Transaction", "description": "Lot and quantity tracking"},
-        {"name": "Report", "description": "Report logs and results"},
+        {"name": "ReportProduct", "description": "Product Defect Result"},
+        {"name": "ReportDefect", "description": "Report Defect Summary"},
         {"name": "Dashboard","description": "Dashboard"}
         # {"name": "Live", "description": "Live Inspection data"},
     ]
@@ -116,6 +117,27 @@ def delete_user_api(userid: str, db: Session = Depends(get_db)):
         return UserService.delete_user(userid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-users", tags=["User"])
+async def upload_user(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return UserService.upload_users(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-userid", tags=["User"])
+def suggest_userid(q: str):
+    try:
+        return user_db.suggest_userid(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-username", tags=["User"])
+def suggest_username(q: str):
+    try:
+        return user_db.suggest_username(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Role Service --------------------
 @app.get("/roles", tags=["Role"])
@@ -143,6 +165,20 @@ def update_role(roleid: str, role: schemas.RoleUpdate, db: Session = Depends(get
 def delete_role_api(roleid: str, db: Session = Depends(get_db)):
     try:
         return role_db.delete_role(roleid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-roles", tags=["Role"])
+async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return role_db.upload_roles(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-role-name", tags=["Role"])
+def suggest_role_name(q: str):
+    try:
+        return role_db.suggest_role_name(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -174,33 +210,82 @@ def delete_product_api(prodid: str, db: Session = Depends(get_db)):
         return ProductService.delete_product(prodid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-products", tags=["Product"])
+async def upload_products(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return ProductService.upload_products(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/suggest-product-id", tags=["Product"])
+def suggest_product_id(q: str):
+    try:
+        return product_db.suggest_product_id(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-product-name", tags=["Product"])
+def suggest_product_name(q: str):
+    try:
+        return product_db.suggest_product_name(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-serial-no", tags=["Product"])
+def suggest_serial_no(q: str):
+    try:
+        return product_db.suggest_serial_no(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Product Type Service --------------------
-@app.get("/product-types", tags=["ProdType"])
+@app.get("/product-types", tags=["ProductType"])
 def product_types():
     try:
         return {"product_types": product_db.get_product_types()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.post("/add-product-type", tags=["ProdType"])
+@app.post("/add-product-type", tags=["ProductType"])
 def add_prodtype(prodtype: schemas.ProdTypeCreate, db: Session = Depends(get_db)):
     try:
-        return ProductService.add_prodtype(prodtype, db)
+        return ProductTypeService.add_prodtype(prodtype, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/update-product-type", tags=["ProdType"])
+@app.put("/update-product-type", tags=["ProductType"])
 def update_prodtype(prodtypeid: str, prodtype: schemas.ProdTypeUpdate, db: Session = Depends(get_db)):
     try:
-        return ProductService.update_prodtype(prodtypeid, prodtype, db)
+        return ProductTypeService.update_prodtype(prodtypeid, prodtype, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/delete-product-type", tags=["ProdType"])
+@app.delete("/delete-product-type", tags=["ProductType"])
 def delete_prodtype_api(prodtypeid: str, db: Session = Depends(get_db)):
     try:
-        return ProductService.delete_producttype(prodtypeid, db)
+        return ProductTypeService.delete_producttype(prodtypeid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-product-types", tags=["ProductType"])
+async def upload_product_types(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return ProductTypeService.upload_product_types(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/suggest-producttype-id", tags=["ProductType"])
+def suggest_producttype_id(q: str):
+    try:
+        return product_db.suggest_producttype_id(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-producttype-name", tags=["ProductType"])
+def suggest_producttype_name(q: str):
+    try:
+        return product_db.suggest_producttype_name(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -232,36 +317,85 @@ def delete_camera_api(cameraid: str, db: Session = Depends(get_db)):
         return CameraService.delete_camera(cameraid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+@app.post("/upload-cameras", tags=["Camera"])
+async def upload_cameras(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return CameraService.upload_cameras(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
+    
+@app.get("/suggest-camera-id", tags=["Camera"])
+def suggest_camera_id(q: str):
+    try:
+        return camera_db.suggest_camera_id(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-camera-name", tags=["Camera"])
+def suggest_camera_name(q: str):
+    try:
+        return camera_db.suggest_camera_name(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-camera-location", tags=["Camera"])
+def suggest_camera_location(q: str):
+    try:
+        return camera_db.suggest_camera_location(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # -------------------- Defect Types Service --------------------
-@app.get("/defect-types", tags=["Defect"])
+@app.get("/defect-types", tags=["DefectType"])
 def get_defect_types():
     try:
         return {"defect_types": defect_db.get_defect_types()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-defect-type", tags=["Defect"])
+@app.post("/add-defect-type", tags=["DefectType"])
 def add_defect_type(defect: schemas.DefectTypeCreate, db: Session = Depends(get_db)):
     try:
         return defect_db.add_defect_type(defect, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/update-defect-type", tags=["Defect"])
+@app.put("/update-defect-type", tags=["DefectType"])
 def update_defect_type(defectid: str, defect: schemas.DefectTypeUpdate, db: Session = Depends(get_db)):
     try:
         return defect_db.update_defect_type(defectid, defect, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/delete-defect-type", tags=["Defect"])
+@app.delete("/delete-defect-type", tags=["DefectType"])
 def delete_defecttype_api(defectid: str, db: Session = Depends(get_db)):
     try:
-        return DefectDB().delete_defecttype(defectid, db)
+        return DefectDB().delete_defect_type(defectid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-defect-types", tags=["DefectType"])
+async def upload_defect_types(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return DefectDB().upload_defect_types(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
 
+@app.get("/suggest-defecttype-id", tags=["DefectType"])
+def suggest_defecttype_id(q: str):
+    try:
+        return defect_db.suggest_defecttype_id(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-defecttype-name", tags=["DefectType"])
+def suggest_defecttype_name(q: str):
+    try:
+        return defect_db.suggest_defecttype_name(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # -------------------- Planning Service --------------------
 @app.get("/planning", tags=["Planning"])
 def planning():
@@ -290,8 +424,51 @@ def delete_planning_api(planid: str, db: Session = Depends(get_db)):
         return PlanningDB().delete_planning(planid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+@app.post("/upload-plannings", tags=["Planning"])
+async def upload_planning(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        return PlanningDB.upload_planning(uploadby, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-planid", tags=["Planning"])
+def suggest_planid(q: str):
+    try:
+        return planning_db.suggest_planid(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-plan-lotno", tags=["Planning"])
+def suggest_plan_lotno(q: str):
+    try:
+        return planning_db.suggest_plan_lotno(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-plan-lineid", tags=["Planning"])
+def suggest_plan_lineid(q: str):
+    try:
+        return planning_db.suggest_plan_lineid(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # -------------------- Detection Model Service --------------------
+
+@app.get("/suggest-modelname", tags=["Model"])
+def suggest_modelname(q: str):
+    try:
+        return DetectionModelDB().suggest_modelname(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-function", tags=["Model"])
+def suggest_function(q: str):
+    try:
+        return DetectionModelDB().suggest_function(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/function", tags=["Model"])
 def get_function():
     try:
@@ -340,18 +517,18 @@ def get_model_camera(modelversionid: int):
         return DetectionModelDB().get_model_camera(modelversionid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.get("/model-detail", tags=["Model"])
-def get_model_detail(modelversionid: int, db: Session = Depends(get_db)):
+def model_detail(modelversionid: int, db: Session = Depends(get_db)):
     try:
-        return DetectionModelService().get_model_detail(modelversionid, db)
+        return DetectionModelService().model_detail(modelversionid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))  
     
 @app.get("/detection-model", tags=["Model"])
-def get_detection_model(db: Session = Depends(get_db)):
+def detection_model(db: Session = Depends(get_db)):
     try:
-        return DetectionModelService().get_detection_model(db)
+        return DetectionModelService().detection_model(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -409,6 +586,7 @@ def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateS
 #     return DetectionModelService().update_model_step2(modelversionid, modelid, updatedby, files, db)
 #   except Exception as e:
 #       raise HTTPException(status_code=500, detail=str(e))
+
     
 # -------------------- Transaction Service --------------------
 @app.get("/transaction", tags=["Transaction"])
@@ -431,51 +609,66 @@ def update_transaction(runningno: int, txn: schemas.TransactionUpdate, db: Sessi
         return transaction_db.update_transaction(runningno, txn, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------- Report Service --------------------
-@app.get("/report-product-defect", tags=["Report"])
-def product_defect_results():
+    
+@app.get("/suggest-transaction-lotno", tags=["Transaction"])
+def suggest_transaction_lotno(q: str):
     try:
-        return {"product_defect_results": ReportDB().get_product_defect_results()}
+        return transaction_db.suggest_transaction_lotno(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/report-defect-summary", tags=["Report"])
+# -------------------- Report Defect Summary Service --------------------
+@app.get("/report-defect-summary", tags=["ReportDefect"])
 def defect_summary():
     try:
         return {"defect_summary": ReportDB().get_defect_summary()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-report-defect", tags=["Report"])
+@app.post("/add-report-defect", tags=["ReportDefect"])
 def add_report_defect(item: schemas.ReportDefectCreate, db: Session = Depends(get_db)):
     try:
         return ReportDB().add_report_defect(item, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/update-report-defect", tags=["Report"])
+@app.put("/update-report-defect", tags=["ReportDefect"])
 def update_report_defect(lotno: str, item: schemas.ReportDefectUpdate, db: Session = Depends(get_db)):
     try:
         return ReportDB().update_report_defect(lotno, item, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-defect-lotno", tags=["ReportDefect"])
+def suggest_defect_lotno(q: str):
+    try:
+        return ReportDB().suggest_defect_lotno(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-report-product", tags=["Report"])
+# -------------------- Product Defect Result Service --------------------
+@app.get("/report-product-defect", tags=["ReportProduct"])
+def product_defect_results():
+    try:
+        return {"product_defect_results": ReportDB().get_product_defect_results()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/add-report-product", tags=["ReportProduct"])
 def add_report_product(item: schemas.ReportProductCreate, db: Session = Depends(get_db)):
     try:
         return ReportDB().add_report_product(item, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-report-product-detail", tags=["Report"])
+@app.post("/add-report-product-detail", tags=["ReportProduct"])
 def add_product_detail(item: schemas.ProductDetailCreate, db: Session = Depends(get_db)):
     try:
         return ReportDB().add_product_detail(item, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/update-product-detail", tags=["Report"])
+@app.put("/update-product-detail", tags=["ReportProduct"])
 def update_report_product(productid: str, item: schemas.ReportProductUpdate, db: Session = Depends(get_db)):
     try:
         return ReportDB().update_report_product(productid, item, db)
@@ -621,8 +814,6 @@ def get_cameras_dropdown_list(db: Session = Depends(get_db)):
         return DashboardService.get_cameras_list(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------- Service --------------------
 
 
 # -------------------- Run Server --------------------

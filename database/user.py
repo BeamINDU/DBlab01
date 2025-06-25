@@ -4,6 +4,8 @@ import database.schemas as schemas
 from datetime import datetime
 from fastapi.responses import JSONResponse
 from typing import Union, Dict, Any
+from fastapi import UploadFile
+import pandas as pd
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -12,17 +14,50 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class UserDB:
-    def _fetch_all(self, query: str):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
 
     def get_users(self):
-        return self._fetch_all("SELECT * FROM public.\"user\" WHERE isdeleted = false")
+        return self._fetch_all("""
+          SELECT  u.*,
+            COALESCE(array_remove(array_agg(ur.roleid), NULL), '{}') AS roles,
+            COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
+          FROM \"user\" u
+          LEFT JOIN userrole ur ON u.userid = ur.userid
+          LEFT JOIN role r ON ur.roleid = r.roleid
+          WHERE u.isdeleted = false 
+          GROUP BY u.userid
+        """)
+
+    def suggest_userid(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT userid FROM \"user\"
+            WHERE isdeleted = false AND userstatus = true AND LOWER(userid) LIKE LOWER(:keyword)
+            ORDER BY userid ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["userid"], "label": row["userid"]} for row in rows]
+    
+    def suggest_username(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT username FROM \"user\"
+            WHERE isdeleted = false AND userstatus = true AND LOWER(username) LIKE LOWER(:keyword)
+            ORDER BY username ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["username"], "label": row["username"]} for row in rows]
+    
 
 
 class UserService:
@@ -95,20 +130,41 @@ class UserService:
             "createddate": now
         })
 
-        # Lookup roleid from roleName
-        # roleid = None
-        # if user.roleid is None and user.roleName:
-        #     role_sql = text("SELECT roleid FROM role WHERE rolename = :rolename")
-        #     role_row = db.execute(role_sql, {"rolename": user.roleName}).first()
-        #     if role_row:
-        #         roleid = role_row.roleid
-        #     else:
-        #         raise HTTPException(status_code=400, detail="Invalid roleName")
-        # else:
-        #     roleid = user.roleid
+        # Update userrole
+        if user.roles:
+            new_roles = set(user.roles or [])
+
+            existing_rows = db.execute(text("""
+                SELECT roleid FROM userrole WHERE userid = :userid
+            """), {"userid": user.userid}).fetchall()
+            existing_roles = set(row[0] for row in existing_rows)
+
+            to_insert = new_roles - existing_roles
+            to_delete = existing_roles - new_roles
+        
+            for roleid in to_insert:
+                db.execute(text("""
+                    INSERT INTO userrole (userid, roleid)
+                    VALUES (:userid, :roleid)
+                """), {"userid": user.userid, "roleid": roleid})
+
+            for roleid in to_delete:
+                db.execute(text("""
+                    DELETE FROM userrole
+                    WHERE userid = :userid AND roleid = :roleid
+                """), {"userid": user.userid, "roleid": roleid})
+
+            new_roles = db.execute(text("""
+                SELECT COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
+                FROM "user" u
+                LEFT JOIN userrole ur ON u.userid = ur.userid
+                LEFT JOIN role r ON ur.roleid = r.roleid
+                WHERE u.isdeleted = false AND u.userid = :userid
+            """), {"userid": user.userid}).fetchone()
+            rolenames = new_roles.rolenames if new_roles else ''
 
         db.commit()
-        return success_response(200, {"userid": user.userid, "createddate": str(now)})
+        return success_response(200, {"userid": user.userid, "rolenames": rolenames, "createddate": str(now)})
 
     @staticmethod
     def edit_user(userid: str, user: schemas.UserUpdate, db: Session):
@@ -150,13 +206,6 @@ class UserService:
             if duplicate_check:
                 if not duplicate_check.isdeleted:
                      return error_response(400, f"User ID '{user.userid}' already exists")
-                # else:
-                #     db.execute(
-                #         text("UPDATE \"user\" SET isdeleted = true WHERE userid = :old_userid"),
-                #         {"old_userid": userid}
-                #     )
-                #     db.commit()
-                #     update_fields["update_userid"] = user.userid
             
         # field other
         if user.ufname is not None: update_fields["ufname"] = user.ufname
@@ -173,10 +222,43 @@ class UserService:
         set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_userid"])
         update_sql = text(f'UPDATE "user" SET {set_clause} WHERE userid = :update_userid')
 
+        # Update userrole
+        if user.roles:
+            new_roles = set(user.roles or [])
+
+            existing_rows = db.execute(text("""
+                SELECT roleid FROM userrole WHERE userid = :userid
+            """), {"userid": user.userid}).fetchall()
+            existing_roles = set(row[0] for row in existing_rows)
+
+            to_insert = new_roles - existing_roles
+            to_delete = existing_roles - new_roles
+        
+            for roleid in to_insert:
+                db.execute(text("""
+                    INSERT INTO userrole (userid, roleid)
+                    VALUES (:userid, :roleid)
+                """), {"userid": user.userid, "roleid": roleid})
+
+            for roleid in to_delete:
+                db.execute(text("""
+                    DELETE FROM userrole
+                    WHERE userid = :userid AND roleid = :roleid
+                """), {"userid": user.userid, "roleid": roleid})
+
+            new_roles = db.execute(text("""
+                SELECT COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
+                FROM "user" u
+                LEFT JOIN userrole ur ON u.userid = ur.userid
+                LEFT JOIN role r ON ur.roleid = r.roleid
+                WHERE u.isdeleted = false AND u.userid = :userid
+            """), {"userid": user.userid}).fetchone()
+            rolenames = new_roles.rolenames if new_roles else ''
+
         try:
           db.execute(update_sql, update_fields)
           db.commit()
-          return success_response(200, { "userid": update_fields.get("userid", userid), "updateddate": str(now)})
+          return success_response(200, { "userid": update_fields.get("userid", userid), "rolenames": rolenames, "updateddate": str(now)})
         except Exception as e:
             db.rollback()
             return error_response(500, f"Database error: {str(e)}")
@@ -191,5 +273,53 @@ class UserService:
         db.commit()
         return success_response(200,{ "userid": userid, "isdeleted": True})
 
+    @staticmethod
+    async def upload_users(uploadby: str, file: UploadFile, db: Session):
+      try:
+        now = datetime.now()
 
+        # ตรวจสอบประเภทไฟล์
+        filename = file.filename.lower()
+        file.file.seek(0)
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(file.file, engine="openpyxl")
+        elif filename.endswith(".csv"):
+            df = pd.read_csv(file.file)
+        else:
+            raise error_response(400, "File must be .xlsx or .csv")
 
+        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
+        user_data = []
+        for _, row in df.iterrows():
+            user_data.append({
+                "userid": row.get("User ID"),
+                "ufname": row.get("First Name"),
+                "ulname": row.get("Last Name"),
+                "username": row.get("Username"),
+                "upassword": '',
+                "email": row.get("Email"),
+                "userstatus": row.get("Status", "Active"),
+                "createdby": uploadby,
+                "createddate": now,
+                # "roles": row.get("Role Name"),
+            })
+
+       
+        # SQL สำหรับ insert
+        insert_sql = """
+            INSERT INTO \"user\" (
+                userid, ufname, ulname, username, upassword, email, userstatus, createdby, createddate
+            )
+            VALUES (
+                :userid, :ufname, :ulname, :username, :upassword, :email, :userstatus, :createdby, :createddate
+            )
+        """
+        # ทำ bulk insert
+        db.execute(text(insert_sql), user_data)
+        db.commit()
+        return success_response(200,{"message": f"{len(user_data)} records uploaded successfully!"})
+ 
+      except Exception as e:
+          print(f"Error uploading user: {e}")
+          db.rollback()
+          raise error_response(500, "Failed to upload user")

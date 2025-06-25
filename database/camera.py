@@ -1,9 +1,10 @@
 from database.connect_to_db import engine, SessionLocal, Session, text, SQLAlchemyError
 from datetime import datetime
 import database.schemas as schemas
-from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from typing import Union, Dict, Any
+from fastapi import UploadFile
+import pandas as pd
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -12,18 +13,50 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class CameraDB:
-    def _fetch_all(self, query: str):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                return [dict(row) for row in result.mappings()]
-
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
-
+        
     def get_cameras(self):
         return self._fetch_all("SELECT * FROM camera WHERE isdeleted = false")
+
+    def suggest_camera_id(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT cameraid FROM camera
+            WHERE isdeleted = false AND camerastatus = true AND LOWER(cameraid) LIKE LOWER(:keyword)
+            ORDER BY cameraid ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["cameraid"], "label": row["cameraid"]} for row in rows]
+    
+    def suggest_camera_name(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT cameraname FROM camera
+            WHERE isdeleted = false AND camerastatus = true AND LOWER(cameraname) LIKE LOWER(:keyword)
+            ORDER BY cameraname ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["cameraname"], "label": row["cameraname"]} for row in rows]
+    
+    def suggest_camera_location(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT cameralocation FROM camera
+            WHERE isdeleted = false AND camerastatus = true AND LOWER(cameralocation) LIKE LOWER(:keyword)
+            ORDER BY cameralocation ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["cameralocation"], "label": row["cameralocation"]} for row in rows]
 
 
 class CameraService:
@@ -151,5 +184,50 @@ class CameraService:
         db.commit()
         return success_response(200,{"cameraid": cameraid, "isdeleted": True})
 
+    @staticmethod
+    async def upload_cameras(uploadby: str, file: UploadFile, db: Session):
+      try:
+        now = datetime.now()
 
+        # ตรวจสอบประเภทไฟล์
+        filename = file.filename.lower()
+        file.file.seek(0)
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(file.file, engine="openpyxl")
+        elif filename.endswith(".csv"):
+            df = pd.read_csv(file.file)
+        else:
+            raise error_response(400, "File must be .xlsx or .csv")
+ 
+        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
+        camera_data = []
+        for _, row in df.iterrows():
+            camera_data.append({
+                "cameraid": row.get("Camera ID"),
+                "cameraname": row.get("Camera Name"),
+                "cameralocation": row.get("Location"),
+                "camerastatus": row.get("Status", "Active"),
+                "createdby": uploadby,
+                "createddate": now,
+            })
+ 
+        # SQL สำหรับ insert
+        insert_sql = """
+            INSERT INTO prodtype (
+                cameraid, cameraname, cameralocation, camerastatus, createdby, createddate
+            )
+            VALUES (
+                :cameraid, :cameraname, :cameralocation, :camerastatus, :createdby, :createddate
+            )
+        """
+        # ทำ bulk insert
+        db.execute(text(insert_sql), camera_data)
+        db.commit()
+        return success_response(200,{"message": f"{len(camera_data)} records uploaded successfully!"})
+ 
+      except Exception as e:
+          print(f"Error uploading camera: {e}")
+          db.rollback()
+          raise error_response(500, "Failed to upload camera")
+      
 

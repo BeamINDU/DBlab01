@@ -4,6 +4,8 @@ from datetime import datetime
 import database.schemas as schemas
 from fastapi.responses import JSONResponse
 from typing import Union, Dict, Any
+from fastapi import UploadFile
+import pandas as pd
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -12,15 +14,31 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class RoleDB:
-    def get_roles(self):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text("SELECT * FROM role WHERE isdeleted = false"))
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
         
+    def get_roles(self):
+        return self._fetch_all("SELECT * FROM role WHERE isdeleted = false ORDER BY rolename")
+
+    def suggest_role_name(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT rolename FROM role
+            WHERE isdeleted = false AND rolestatus = true AND LOWER(rolename) LIKE LOWER(:keyword)
+            ORDER BY rolename ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["rolename"], "label": row["rolename"]} for row in rows]
+
     def add_role(self, role: schemas.RoleCreate, db: Session):
         # Check if user exists
         if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
@@ -139,3 +157,48 @@ class RoleDB:
         db.commit()
         return success_response(200,{"roleid": roleid, "isdeleted": True})
 
+    @staticmethod
+    async def upload_roles(uploadby: str, file: UploadFile, db: Session):
+      try:
+        now = datetime.now()
+
+        # ตรวจสอบประเภทไฟล์
+        filename = file.filename.lower()
+        file.file.seek(0)
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(file.file, engine="openpyxl")
+        elif filename.endswith(".csv"):
+            df = pd.read_csv(file.file)
+        else:
+            raise error_response(400, "File must be .xlsx or .csv")
+
+        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
+        role_data = []
+        for _, row in df.iterrows():
+            role_data.append({
+                "rolename": row.get("Role Name"),
+                "roledescription": row.get("Description"),
+                "rolestatus": row.get("Status", "Active"),
+                "createdby": uploadby,
+                "createddate": now,
+            })
+
+        # SQL สำหรับ insert
+        insert_sql = """
+            INSERT INTO role (
+                rolename, roledescription, rolestatus, createdby, createddate
+            )
+            VALUES (
+                :rolename, :roledescription, :rolestatus, :createdby, :createddate
+            )
+        """
+        # ทำ bulk insert
+        db.execute(text(insert_sql), role_data)
+        db.commit()
+        return success_response(200,{"message": f"{len(role_data)} records uploaded successfully!"})
+ 
+      except Exception as e:
+          print(f"Error uploading role: {e}")
+          db.rollback()
+          raise error_response(500, "Failed to upload role")
+      

@@ -80,13 +80,11 @@ class UserCreate(BaseModel):
     upassword: Optional[str] = None
     email: Optional[str] = None
     userstatus: Optional[bool] = Field(default=True, alias="status")
-    # roleid: Optional[int] = None
-    # roleName: Optional[str] = None  # for lookup
+    roles: Optional[List[int]] = None
     createdby: Optional[str] = Field(default=None, alias="createdBy")
     createddate: Optional[datetime] = Field(default=None, alias="createdDate")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
     updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
-    # userRoles: Optional[str] = None
 
 class UserUpdate(BaseModel):
     userid: str = Field(alias="userId")
@@ -96,10 +94,9 @@ class UserUpdate(BaseModel):
     upassword: Optional[str] = None
     email: Optional[str] = None
     userstatus: Optional[bool] = Field(default=None, alias="status")
-    # roleid: Optional[int] = None
+    roles: Optional[List[int]] = None
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
     updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
-    # userRoles: Optional[str] = None
 
 class DefectTypeCreate(BaseModel):
     defectid: str = Field(alias="defectTypeId")

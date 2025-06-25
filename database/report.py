@@ -12,11 +12,14 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class ReportDB:
-    def _fetch_all(self, query: str):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
@@ -26,34 +29,19 @@ class ReportDB:
     
     def get_product_defect_results(self):
         return self._fetch_all("SELECT * FROM productdefectresult")
+    
+    def suggest_defect_lotno(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT prodlot FROM defectsummary
+            WHERE LOWER(prodlot) LIKE LOWER(:keyword)
+            ORDER BY prodlot ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["prodlot"], "label": row["prodlot"]} for row in rows]
+    
 
-    def add_report_defect(self, item: schemas.ReportDefectCreate, db: Session):
-        try:
-            db.execute(text("""
-                INSERT INTO defectsummary (lotno, producttype, defecttype, total, ok, ng)
-                VALUES (:lotno, :producttype, :defecttype, :total, :ok, :ng)
-            """), item.dict(by_alias=True))
-            db.commit()
-            return success_response(200, {"status": "DefectSummary added", "lotNo": item.lotno})
-        
-        except SQLAlchemyError as e:
-            raise error_response(500, str(e))
-
-    def update_report_defect(self, lotno: str, item: schemas.ReportDefectUpdate, db: Session):
-        try:
-            update_fields = item.dict(exclude_unset=True, by_alias=True)
-            if not update_fields:
-                raise error_response(400, "No fields to update")
-            update_fields["lotno"] = lotno
-            set_clause = ", ".join([f"{k} = :{k}" for k in update_fields if k != "lotno"])
-            db.execute(text(f"""
-                UPDATE defectsummary SET {set_clause} WHERE lotno = :lotno
-            """), update_fields)
-            db.commit()
-            return success_response(200, {"status": "DefectSummary updated", "lotNo": lotno})
-        
-        except SQLAlchemyError as e:
-            raise error_response(500, str(e))
+    #--- Product Defect Result -------------------------------------------------------------
 
     def add_report_product(self, item: schemas.ReportProductCreate, db: Session):
         try:
@@ -107,6 +95,36 @@ class ReportDB:
 
             db.commit()
             return success_response(200, {"status": "ProductDetail added", "productId": item.productid})
+        
+        except SQLAlchemyError as e:
+            raise error_response(500, str(e))
+
+    #--- Report Defect Summary -------------------------------------------------------------
+
+    def add_report_defect(self, item: schemas.ReportDefectCreate, db: Session):
+        try:
+            db.execute(text("""
+                INSERT INTO defectsummary (lotno, producttype, defecttype, total, ok, ng)
+                VALUES (:lotno, :producttype, :defecttype, :total, :ok, :ng)
+            """), item.dict(by_alias=True))
+            db.commit()
+            return success_response(200, {"status": "DefectSummary added", "lotNo": item.lotno})
+        
+        except SQLAlchemyError as e:
+            raise error_response(500, str(e))
+
+    def update_report_defect(self, lotno: str, item: schemas.ReportDefectUpdate, db: Session):
+        try:
+            update_fields = item.dict(exclude_unset=True, by_alias=True)
+            if not update_fields:
+                raise error_response(400, "No fields to update")
+            update_fields["lotno"] = lotno
+            set_clause = ", ".join([f"{k} = :{k}" for k in update_fields if k != "lotno"])
+            db.execute(text(f"""
+                UPDATE defectsummary SET {set_clause} WHERE lotno = :lotno
+            """), update_fields)
+            db.commit()
+            return success_response(200, {"status": "DefectSummary updated", "lotNo": lotno})
         
         except SQLAlchemyError as e:
             raise error_response(500, str(e))

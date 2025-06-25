@@ -4,18 +4,31 @@ import database.schemas as schemas
 from datetime import datetime
 
 class TransactionDB:
-    def _fetch_all(self, query: str):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
 
     def get_transaction(self):
-        return self._fetch_all("SELECT * FROM public.transactionreport")
-
+        return self._fetch_all("SELECT * FROM transactionreport")
+    
+    def suggest_transaction_lotno(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT prodlot FROM transactionreport
+            WHERE LOWER(prodlot) LIKE LOWER(:keyword)
+            ORDER BY prodlot ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["prodlot"], "label": row["prodlot"]} for row in rows]
+    
     def add_transaction(self, txn: schemas.TransactionCreate, db: Session):
         if db.execute(text("SELECT 1 FROM transaction WHERE runningno = :runningno"),
                       {"runningno": txn.runningno}).first():

@@ -4,6 +4,8 @@ from datetime import datetime
 from fastapi.responses import JSONResponse
 import database.schemas as schemas
 from typing import Union, Dict, Any
+from fastapi import UploadFile
+import pandas as pd
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -12,18 +14,51 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class PlanningDB:
-    def _fetch_all(self, query: str):
+    def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
-
+        
     def get_planning(self):
         return self._fetch_all("SELECT * FROM planning")
-
+    
+    def suggest_planid(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT prodid FROM planning
+            WHERE LOWER(prodid) LIKE LOWER(:keyword)
+            ORDER BY prodid ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["prodid"], "label": row["prodid"]} for row in rows]
+    
+    def suggest_plan_lotno(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT prodlot FROM planning
+            WHERE LOWER(prodlot) LIKE LOWER(:keyword)
+            ORDER BY prodlot ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["prodlot"], "label": row["prodlot"]} for row in rows]
+    
+    def suggest_plan_lineid(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT prodline FROM planning
+            WHERE LOWER(prodline) LIKE LOWER(:keyword)
+            ORDER BY prodline ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["prodline"], "label": row["prodline"]} for row in rows]
+    
     def add_planning(self, plan: schemas.PlanningCreate, db: Session):
         now = datetime.now()
 
@@ -139,4 +174,51 @@ class PlanningDB:
         db.commit()
         return success_response(200,{"planid": planid, "isdeleted": True})
 
+    async def upload_planning(uploadby: str, file: UploadFile, db: Session):
+      try:
+        now = datetime.now()
 
+        # ตรวจสอบประเภทไฟล์
+        filename = file.filename.lower()
+        file.file.seek(0)
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(file.file, engine="openpyxl")
+        elif filename.endswith(".csv"):
+            df = pd.read_csv(file.file)
+        else:
+            raise error_response(400, "File must be .xlsx or .csv")
+
+        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
+        role_data = []
+        for _, row in df.iterrows():
+            role_data.append({
+                "planid": row.get("Plan ID"),
+                "prodid": row.get("Product ID"),
+                "prodlot": row.get("Lot No"),
+                "prodline": row.get("Line ID"),
+                "quantity": row.get("Quantity"),
+                "rolename": row.get("Role Name"),
+                "startdatetime": pd.to_datetime(row.get("Start Date")) if pd.notnull(row.get("Start Date")) else None,
+                "enddatetime": pd.to_datetime(row.get("End Date")) if pd.notnull(row.get("End Date")) else None,
+                "createdby": uploadby,
+                "createddate": now,
+            })
+
+        # SQL สำหรับ insert
+        insert_sql = """
+            INSERT INTO planning (
+                planid, prodid, prodlot, prodline, quantity, startdatetime, enddatetime, createdby, createddate
+            )
+            VALUES (
+                :planid, :prodid, :prodlot, :prodline, :quantity, :startdatetime, :enddatetime, :createdby, :createddate
+            )
+        """
+        # ทำ bulk insert
+        db.execute(text(insert_sql), role_data)
+        db.commit()
+        return success_response(200,{"message": f"{len(role_data)} records uploaded successfully!"})
+ 
+      except Exception as e:
+          print(f"Error uploading planning: {e}")
+          db.rollback()
+          raise error_response(500, "Failed to upload plan")

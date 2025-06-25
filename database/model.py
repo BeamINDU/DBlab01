@@ -31,8 +31,11 @@ class DetectionModelDB:
     def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query), params or {})
-                return [dict(row) for row in result.mappings()]
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                return list(result.mappings())
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
             return []
@@ -68,9 +71,28 @@ class DetectionModelDB:
     def get_model_camera(self, modelversionid: int):
         return self._fetch_one("SELECT * FROM cameramodelprodapplied WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
 
+    def suggest_modelname(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT modelname FROM model
+            WHERE isdeleted = false AND LOWER(modelname) LIKE LOWER(:keyword)
+            ORDER BY modelname ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["modelname"], "label": row["modelname"]} for row in rows]
+    
+    def suggest_function(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT functionname FROM function
+            WHERE LOWER(functionname) LIKE LOWER(:keyword)
+            ORDER BY functionname ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["functionname"], "label": row["functionname"]} for row in rows]
+
 
 class DetectionModelService:
-    
     @staticmethod
     def save_image_file(file: UploadFile, folder: str) -> str:
         folder_path = os.path.join(UPLOAD_FOLDER, folder)
@@ -206,7 +228,7 @@ class DetectionModelService:
         return success_response(200, {"message": "Model marked as deleted", "modelid": modelid, "isdeleted": True})
     
     @staticmethod
-    def get_model_detail(modelversionid: int, db: Session):
+    def model_detail(modelversionid: int, db: Session):
         sql = text("""
           SELECT 
             m.modelid,
@@ -253,7 +275,7 @@ class DetectionModelService:
         return success_response(200, result)
    
     @staticmethod
-    def get_detection_model(db: Session):
+    def detection_model(db: Session):
       sql = text("""
           SELECT 
 			        mv.modelversionid,
