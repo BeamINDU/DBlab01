@@ -15,7 +15,7 @@ class RoleDB:
     def get_roles(self):
         try:
             with engine.connect() as conn:
-                result = conn.execute(text("SELECT * FROM role"))
+                result = conn.execute(text("SELECT * FROM role WHERE isdeleted = false"))
                 return [dict(row) for row in result.mappings()]
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
@@ -94,40 +94,40 @@ class RoleDB:
         
         update_fields = {}
         now = datetime.now()
+        update_fields["roleid"] = roleid
+        update_fields["updateddate"] = now
+        update_fields["update_roleid"] = roleid
 
         # Check updatedby (user id)
-        if role.updatedby:
-            if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                              {"userid": role.updatedby}).first():
-                return error_response(400, "Invalid user (updatedby)")
-            update_fields["updatedby"] = role.updatedby
+        if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),{"userid": role.updatedby}).first():
+            return error_response(400, "Invalid user (updatedby)")
+        update_fields["updatedby"] = role.updatedby
 
         # Check rolename duplicate (not self)
         old_rolename = existing_role.rolename
 
-        if role.rolename and role.rolename != old_rolename:
-            duplicate_check = db.execute(text("""
-                SELECT isdeleted FROM role WHERE rolename = :new_rolename
-            """), {"new_rolename": role.rolename}).first()
+        if role.rolename != old_rolename:
+            duplicate_check = db.execute(
+                text("SELECT isdeleted FROM role WHERE rolename = :new_rolename"), 
+                {"new_rolename": role.rolename}).first()
 
             if duplicate_check:
                 if not duplicate_check.isdeleted:
                     return error_response(400, "New role name already exists")
-            update_fields["roleid"] = role.roleid
-
-        # field other
-        update_fields["updateddate"] = now
 
         if not update_fields:
           return error_response(400, "No fields to update")
+        
+        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_roleid"])
+        update_sql = text(f"UPDATE role SET {set_clause} WHERE roleid = :update_roleid")
 
-        update_fields["old_roleid"] = roleid
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_roleid"])
-
-        update_sql = text(f"UPDATE role SET {set_clause} WHERE roleid = :old_roleid")
-        db.execute(update_sql, update_fields)
-        db.commit()
-        return success_response(200, { "roleid": update_fields.get("roleid", roleid), "updateddate": str(now)})
+        try:
+          db.execute(update_sql, update_fields)
+          db.commit()
+          return success_response(200, { "roleid": update_fields.get("roleid", roleid), "updateddate": str(now)})
+        except Exception as e:
+            db.rollback()
+            return error_response(500, f"Database error: {str(e)}")
     
     @staticmethod
     def delete_role(roleid: str, db: Session):

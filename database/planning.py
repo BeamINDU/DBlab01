@@ -25,136 +25,117 @@ class PlanningDB:
         return self._fetch_all("SELECT * FROM planning")
 
     def add_planning(self, plan: schemas.PlanningCreate, db: Session):
-        # Check if planning already exists
-        existing_planning = db.execute(
-            text("SELECT isdeleted FROM planning WHERE planid = :planid"),
-            {"planid": plan.planid}
-        ).first()
-
         now = datetime.now()
 
-        if existing_planning:
-            if not existing_planning.isdeleted:  # isdeleted = False
-                return error_response(400, "Plan ID already exists")
+        # Validate planid
+        if db.execute(text("SELECT 1 FROM planning WHERE planid = :planid"), {"planid": plan.planid}).first():
+            return error_response(400, "New Plan ID already exists")
 
-            # If isdeleted = true, restore the old record
-            update_sql = text("""
-                UPDATE planning SET
-                    prodid = :prodid,
-                    prodlot = :prodlot,
-                    prodline = :prodline,
-                    quantity = :quantity,
-                    startdatetime = :startdatetime,
-                    enddatetime = :enddatetime,
-                    createdby = :createdby,
-                    createddate = :createddate,
-                    isdeleted = false
-                WHERE planid = :planid
-            """)
-            db.execute(update_sql, {
-                "planid": plan.planid,
-                "prodid": plan.prodid,
-                "prodlot": plan.prodlot,
-                "prodline": plan.prodline,
-                "quantity": plan.quantity,
-                "startdatetime": plan.startdatetime,
-                "enddatetime": plan.enddatetime,
-                "createdby": plan.createdby,
-                "createddate": now,
-                "updatedby": None  ,
-                "updateddate": None  
-            })
+        # Validate createdby
+        if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"), {"userid": plan.createdby}).first():
+            return error_response(400, "Invalid user (createdby)")
+        
+        # Validate prodid
+        if not db.execute(text("SELECT 1 FROM product WHERE prodid = :prodid"), {"prodid": plan.prodid}).first():
+            return error_response(400, "Invalid Product ID")
 
-        else:
-            # Insert new record
-            insert_sql = text("""
-                INSERT INTO planning (
-                    planid, prodid, prodlot, prodline, quantity, startdatetime, enddatetime,
-                    createdby, createddate, isdeleted
-                ) VALUES (
-                    :planid, :prodid, :prodlot, :prodline, :quantity, :startdatetime, :enddatetime,
-                    :createdby, :createddate, false
-                )
-            """)
-            db.execute(insert_sql, {
-                "planid": plan.planid,
-                "prodid": plan.prodid,
-                "prodlot": plan.prodlot,
-                "prodline": plan.prodline,
-                "quantity": plan.quantity,
-                "startdatetime": plan.startdatetime,
-                "enddatetime": plan.enddatetime,
-                "createdby": plan.createdby,
-                "createddate": now,
-            })
+        # Check duplicate prodlot + prodid
+        duplicate_combo_check = db.execute(text("""
+            SELECT planid FROM planning
+            WHERE prodlot = :prodlot
+              AND prodid = :prodid
+        """), {
+            "prodlot": plan.prodlot,
+            "prodid": plan.prodid,
+        }).first()
+
+        if duplicate_combo_check:
+            return error_response(400, f"Combination of prodlot '{plan.prodlot}' and prodid '{plan.prodid}' already exists in another plan.")
+        
+        # Insert new record
+        insert_sql = text("""
+            INSERT INTO planning (
+                planid, prodid, prodlot, prodline, quantity, 
+                startdatetime, enddatetime, createdby, createddate
+            ) VALUES (
+                :planid, :prodid, :prodlot, :prodline, :quantity, 
+                :startdatetime, :enddatetime, :createdby, :createddate
+            )
+        """)
+        db.execute(insert_sql, {
+            "planid": plan.planid,
+            "prodid": plan.prodid,
+            "prodlot": plan.prodlot,
+            "prodline": plan.prodline,
+            "quantity": plan.quantity,
+            "startdatetime": plan.startdatetime,
+            "enddatetime": plan.enddatetime,
+            "createdby": plan.createdby,
+            "createddate": now,
+        })
 
         db.commit()
         return success_response(200, {"planid": plan.planid, "createddate": str(now)})
 
     def update_planning(self, planid: str, plan: schemas.PlanningUpdate, db: Session):
-        # Check if planning already exists
-        if not db.execute(text("SELECT 1 FROM planning WHERE planid = :planid"), {"planid": planid}).first():
-            return error_response(404, "Plan ID not found")
+      # Check if planning exists
+      if not db.execute(text("SELECT 1 FROM planning WHERE planid = :planid"), {"planid": planid}).first():
+          return error_response(404, "Plan ID not found")
 
-        update_fields = {}
-        now = datetime.now()
+      update_fields = {}
+      now = datetime.now()
+      update_fields["planid"] = plan.planid
+      update_fields["updateddate"] = now
+      update_fields["update_planid"] = planid
 
-        # Check updatedby (user id)
-        if plan.updatedby:
-            if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                              {"userid": plan.updatedby}).first():
-                return error_response(400, "Invalid user (updatedby)")
-            update_fields["updatedby"] = plan.updatedby
+      # Validate updatedby
+      if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"), {"userid": plan.updatedby}).first():
+          return error_response(400, "Invalid user (updatedby)")
+      update_fields["updatedby"] = plan.updatedby
 
-        # Check prodid
-        if plan.prodid is not None:
-            if not db.execute(text("SELECT 1 FROM product WHERE prodid = :prodid"),
-                              {"prodid": plan.prodid}).first():
-                return error_response(400, "Invalid Product ID")
-            update_fields["prodid"] = plan.prodid
+      # Validate prodid
+      if not db.execute(text("SELECT 1 FROM product WHERE prodid = :prodid"), {"prodid": plan.prodid}).first():
+          return error_response(400, "Invalid Product ID")
+      update_fields["prodid"] = plan.prodid
 
+      # Check duplicate prodlot + prodid
+      duplicate_combo_check = db.execute(text("""
+          SELECT planid FROM planning
+          WHERE prodlot = :prodlot
+            AND prodid = :prodid
+            AND planid != :planid
+      """), {
+          "prodlot": plan.prodlot,
+          "prodid": plan.prodid,
+          "planid": planid
+      }).first()
 
-        # Check planid duplicate (not self)
-        if plan.planid and plan.planid != planid:
-            duplicate_check = db.execute(text("""
-                SELECT isdeleted FROM planning WHERE planid = :new_planid
-            """), {"new_planid": plan.planid}).first()
+      if duplicate_combo_check:
+          return error_response(400, f"Combination of prodlot '{plan.prodlot}' and prodid '{plan.prodid}' already exists in another plan.")
 
-            if duplicate_check:
-                if not duplicate_check.isdeleted:
-                    return error_response(400, "New Plan ID already exists")
-                else:
-                    # duplicate → delete record where isdeleted = true
-                    db.execute(text("DELETE FROM planning WHERE planid = :new_planid"), {"new_planid": plan.planid})
-                    db.commit()
+      try:
+          # Add update fields
+          if plan.prodlot: update_fields["prodlot"] = plan.prodlot
+          if plan.prodline: update_fields["prodline"] = plan.prodline
+          if plan.startdatetime: update_fields["startdatetime"] = plan.startdatetime
+          if plan.enddatetime: update_fields["enddatetime"] = plan.enddatetime
 
-            update_fields["planid"] = plan.planid
+          set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_planid"])
+          update_sql = text(f"UPDATE planning SET {set_clause} WHERE planid = :update_planid")
 
-        # field other
-        if plan.prodlot: update_fields["prodlot"] = plan.prodlot
-        if plan.prodline: update_fields["prodline"] = plan.prodline
-        if plan.startdatetime: update_fields["startdatetime"] = plan.startdatetime
-        if plan.enddatetime: update_fields["enddatetime"] = plan.enddatetime
-
-        update_fields["updateddate"] = now
-
-        if not update_fields:
-          return error_response(400, "No fields to update")
-
-        update_fields["old_planid"] = planid
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_planid"])
-
-        update_sql = text(f"UPDATE planning SET {set_clause} WHERE planid = :old_planid")
-        db.execute(update_sql, update_fields)
-        db.commit()
-        return success_response(200, { "planid": update_fields.get("planid", planid), "updateddate": str(now)})
+          db.execute(update_sql, update_fields)
+          db.commit()
+          return success_response(200, {"planid": update_fields.get("planid", planid), "updateddate": str(now)})
+      except Exception as e:
+          db.rollback()
+          return error_response(500, f"Database error: {str(e)}")
     
     @staticmethod
     def delete_planning(planid: str, db: Session):
         if not db.execute(text("SELECT 1 FROM planning WHERE planid = :planid"), {"planid": planid}).first():
             return error_response(404, "Plan not found")
 
-        db.execute(text("UPDATE planning SET isdeleted = true WHERE planid = :planid"), {"planid": planid})
+        db.execute(text("DELETE FROM planning WHERE planid = :planid"), {"planid": planid})
         db.commit()
         return success_response(200,{"planid": planid, "isdeleted": True})
 

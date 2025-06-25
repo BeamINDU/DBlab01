@@ -306,6 +306,13 @@ def get_label_class():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.get("/version", tags=["Model"])
+def get_version(modelid : int):
+    try:
+        return DetectionModelDB().get_version(modelid)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/model-function", tags=["Model"])
 def get_model_function(modelversionid : int):
     try:
@@ -368,35 +375,40 @@ def update_model_step1(modelversionid: str, model: schemas.DetectionModelUpdateS
         return DetectionModelService().update_model_step1(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.post("/update-model-step2", tags=["Model"])
-def update_model_step2(
-    modelversionid: int = Form(...),
-    modelid: int = Form(...),
-    updatedby: str = Form(...),
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db)
-):
+  
+@app.put("/update-model-step2", tags=["Model"])
+def update_model_step2(modelversionid: str, model: schemas.DetectionModelUpdateStep2, db: Session = Depends(get_db)):
     try:
-        return DetectionModelService().update_model_step2(modelversionid, modelid, updatedby, files, db)
+        return DetectionModelService().update_model_step2(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.put("/update-model-step3", tags=["Model"])
 def update_model_step3(modelversionid: str, model: schemas.DetectionModelUpdateStep3, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step3(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+     
 @app.put("/update-model-step4", tags=["Model"])
 def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateStep4, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step4(modelversionid, model, db)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-
+        raise HTTPException(status_code=500, detail=str(e))   
+   
+# @app.post("/update-model-step3", tags=["Model"])
+# def update_model_step2(
+#     modelversionid: int = Form(...),
+#     modelid: int = Form(...),
+#     updatedby: str = Form(...),
+#     files: List[UploadFile] = File(...),
+#     db: Session = Depends(get_db)
+# ):
+#   try:
+#     return DetectionModelService().update_model_step2(modelversionid, modelid, updatedby, files, db)
+#   except Exception as e:
+#       raise HTTPException(status_code=500, detail=str(e))
     
 # -------------------- Transaction Service --------------------
 @app.get("/transaction", tags=["Transaction"])
@@ -471,21 +483,35 @@ def update_report_product(productid: str, item: schemas.ReportProductUpdate, db:
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Permission Service --------------------
+@app.put("/permissions", tags=["Permission"])
+def get_permission(roleid: int, db: Session = Depends(get_db)):
+    try:
+        return PermissionDB().get_permission(roleid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.put("/update_permission", tags=["Permission"])
-def update_permission_api(permissionid: int, perm: schemas.PermissionUpdate, db: Session = Depends(get_db)):
+def update_permission(permissionid: int, perm: schemas.PermissionUpdate, db: Session = Depends(get_db)):
     try:
         return PermissionDB().update_permission(permissionid, perm, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/delete_permission", tags=["Permission"])
-def delete_permission_api(permissionid: int, db: Session = Depends(get_db)):
+def delete_permission(permissionid: int, db: Session = Depends(get_db)):
     try:
         return permission_db.delete_permission(permissionid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Menu Service --------------------
+@app.post("/menu", tags=["Menu"])
+def get_menu():
+    try:
+        return menu_db.get_menu()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/add_menu", tags=["Menu"])
 def add_menu_api(menu: schemas.MenuCreate, db: Session = Depends(get_db)):
     try:

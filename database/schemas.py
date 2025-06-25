@@ -166,41 +166,45 @@ class DetectionModelUpdate(BaseModel):
     updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep1(BaseModel):
+    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
-    functionids: Optional[List[int]] = Field(default=None, alias="functions")
+    functions: Optional[List[int]] = Field(default=None, alias="functions")
     # modelstatus: Optional[str] = Field(default=None, alias="status")
-    currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep2(BaseModel):
-    modelid: int = Field(alias="modelId")
-    # modelstatus: Optional[str] = Field(default=None, alias="status")
-    currentstep: Optional[int] = Field(default=None, alias="currentStep")
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
-
-class DetectionModelUpdateStep3(BaseModel):
+    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
     modelname: Optional[str] = Field(default=None, alias="modelName")
+    prodid: str = Field(alias="ProductId")
     modeldescription: Optional[str] = Field(default=None, alias="description")
     trainpercent: Optional[int] = Field(default=None, alias="trainDataset")
     testpercent: Optional[int] = Field(default=None, alias="testDataset")
     valpercent: Optional[int] = Field(default=None, alias="validationDataset")
     epochs: Optional[int] = Field(default=None, alias="epochs")
-    # modelstatus: Optional[str] = Field(default=None, alias="status")
-    currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+
+class DetectionModelUpdateStep3(BaseModel):
+    # modelversionid: int = Field(alias="modelVersionId")
+    modelid: int = Field(alias="modelId")
+    base64: Optional[str]
+    annotate: Optional[str]
+    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep4(BaseModel):
+    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
     cameraid: Optional[int] = Field(default=None, alias="cameraId")
     versionno: Optional[str] = Field(default=None, alias="version")
-    # modelstatus: Optional[str] = Field(default=None, alias="status")
-    currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class TransactionCreate(BaseModel):
     runningno: int = Field(alias="runningNo")

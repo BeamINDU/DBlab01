@@ -101,62 +101,58 @@ class ProductService:
 
       update_fields = {}
       now = datetime.now()
-      
+      update_fields["prodid"] = product.prodid
+      update_fields["updateddate"] = now
+      update_fields["update_prodid"] = prodid
+
       # Check updatedby (user id)
-      if product.updatedby:
-          if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                            {"userid": product.updatedby}).first():
-              return error_response(400, "Invalid user (updatedby)")
-          update_fields["updatedby"] = product.updatedby
+      if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
+                        {"userid": product.updatedby}).first():
+          return error_response(400, "Invalid user (updatedby)")
+      update_fields["updatedby"] = product.updatedby
 
       # Check prodtypeid
-      if product.prodtypeid is not None:
-          if not db.execute(text("SELECT 1 FROM prodtype WHERE prodtypeid = :prodtypeid"),
-                            {"prodtypeid": product.prodtypeid}).first():
-              return error_response(400, "Invalid Product Type")
-          update_fields["prodtypeid"] = product.prodtypeid
+      if not db.execute(text("SELECT 1 FROM prodtype WHERE prodtypeid = :prodtypeid"),
+                        {"prodtypeid": product.prodtypeid}).first():
+          return error_response(400, "Invalid Product Type")
+      update_fields["prodtypeid"] = product.prodtypeid
 
       # Check prodid duplicate (not self)
-      if product.prodid and product.prodid != prodid:
-          duplicate_check = db.execute(text("""
-              SELECT isdeleted FROM product WHERE prodid = :new_prodid
-          """), {"new_prodid": product.prodid}).first()
+      if product.prodid != prodid:
+          duplicate_check = db.execute(
+              text("SELECT isdeleted FROM product WHERE prodid = :new_prodid"), 
+              {"new_prodid": product.prodid}).first()
 
           if duplicate_check:
               if not duplicate_check.isdeleted:
                   return error_response(400, "New Product ID already exists")
               else:
-                  # duplicate → delete record where isdeleted = true
                   db.execute(
-                        text("UPDATE product SET isdeleted = true WHERE prodid = :new_prodid"),
-                        {"new_prodid": product.prodid}
+                        text("UPDATE product SET isdeleted = true WHERE prodid = :old_prodid"),
+                        {"old_prodid": prodid}
                     )
                   db.commit()
-
-          update_fields["prodid"] = product.prodid
+                  update_fields["update_prodid"] = product.prodid
 
       # field other
-      if product.prodname is not None:
-          update_fields["prodname"] = product.prodname
-      if product.prodserial is not None:
-          update_fields["prodserial"] = product.prodserial
-      if product.prodstatus is not None:
-          update_fields["prodstatus"] = product.prodstatus
-      if product.updatedby is not None:
-          update_fields["updatedby"] = product.updatedby
-
-      update_fields["updateddate"] = now
+      if product.prodname is not None: update_fields["prodname"] = product.prodname
+      if product.prodserial is not None: update_fields["prodserial"] = product.prodserial
+      if product.prodstatus is not None: update_fields["prodstatus"] = product.prodstatus
+      update_fields["isdeleted"] = False
 
       if not update_fields:
           return error_response(400, "No fields to update")
+      
+      set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_prodid"])
+      update_sql = text(f"UPDATE product SET {set_clause} WHERE prodid = :update_prodid")
 
-      update_fields["old_prodid"] = prodid
-      set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_prodid"])
-
-      update_sql = text(f"UPDATE product SET {set_clause} WHERE prodid = :old_prodid")
-      db.execute(update_sql, update_fields)
-      db.commit()
-      return success_response(200, { "prodid": update_fields.get("prodid", prodid), "updateddate": str(now)})
+      try:
+        db.execute(update_sql, update_fields)
+        db.commit()
+        return success_response(200, { "prodid": update_fields.get("prodid", prodid), "updateddate": str(now)})
+      except Exception as e:
+        db.rollback()
+        return error_response(500, f"Database error: {str(e)}")
 
     @staticmethod
     def delete_product(prodid: str, db: Session):
@@ -234,52 +230,51 @@ class ProductService:
 
         update_fields = {}
         now = datetime.now()
+        update_fields["prodtypeid"] = prodtypeid
+        update_fields["updateddate"] = now
+        update_fields["update_prodtypeid"] = prodtypeid
 
-        if prodtype.updatedby:
-            if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                              {"userid": prodtype.updatedby}).first():
-                return error_response(400, "Invalid user (updatedby)")
-            update_fields["updatedby"] = prodtype.updatedby
+        if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
+                          {"userid": prodtype.updatedby}).first():
+            return error_response(400, "Invalid user (updatedby)")
+        update_fields["updatedby"] = prodtype.updatedby
 
         
-        if prodtype.prodtypeid and prodtype.prodtypeid != prodtypeid:
-            duplicate_check = db.execute(text("""
-                SELECT isdeleted FROM product WHERE prodtypeid = :new_prodtypeid
-            """), {"new_prodtypeid": prodtype.prodtypeid}).first()
+        if prodtype.prodtypeid != prodtypeid:
+            duplicate_check = db.execute(
+                text("SELECT isdeleted FROM product WHERE prodtypeid = :new_prodtypeid"), 
+                {"new_prodtypeid": prodtype.prodtypeid}
+            ).first()
 
             if duplicate_check:
                 if not duplicate_check.isdeleted:
                     return error_response(400, "New Product Type ID already exists")
                 else:
                     db.execute(
-                        text("UPDATE product SET isdeleted = true WHERE prodtypeid = :new_pprodtypeid"),
-                        {"new_pprodtypeid": prodtype.prodtypeid}
+                        text("UPDATE product SET isdeleted = true WHERE prodtypeid = :old_pprodtypeid"),
+                        {"old_pprodtypeid": prodtypeid}
                     )
                     db.commit()
+                    update_fields["update_prodtypeid"] = prodtype.prodtypeid
 
-            update_fields["prodtypeid"] = prodtype.prodtypeid
-
-        if prodtype.prodtype is not None:
-            update_fields["prodtype"] = prodtype.prodtype
-        if prodtype.proddescription is not None:
-            update_fields["proddescription"] = prodtype.proddescription
-        if prodtype.prodstatus is not None:
-            update_fields["prodstatus"] = prodtype.prodstatus
-        if prodtype.updatedby:
-            update_fields["updatedby"] = prodtype.updatedby
-
-        update_fields["updateddate"] = now
-
+        if prodtype.prodtype is not None: update_fields["prodtype"] = prodtype.prodtype
+        if prodtype.proddescription is not None: update_fields["proddescription"] = prodtype.proddescription
+        if prodtype.prodstatus is not None: update_fields["prodstatus"] = prodtype.prodstatus
+        update_fields["isdeleted"] = False
+        
         if not update_fields:
             return error_response(400, "No fields to update")
+        
+        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_prodtypeid"])
+        update_sql = text(f"UPDATE prodtype SET {set_clause} WHERE prodtypeid = :update_prodtypeid")
 
-        update_fields["old_prodtypeid"] = prodtypeid
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_prodtypeid"])
-
-        update_sql = text(f"UPDATE prodtype SET {set_clause} WHERE prodtypeid = :old_prodtypeid")
-        db.execute(update_sql, update_fields)
-        db.commit()
-        return success_response(200, {"prodtypeid": update_fields.get("prodtypeid", prodtypeid), "updateddate": str(now)})
+        try:
+          db.execute(update_sql, update_fields)
+          db.commit()
+          return success_response(200, {"prodtypeid": update_fields.get("prodtypeid", prodtypeid), "updateddate": str(now)})
+        except Exception as e:
+            db.rollback()
+            return error_response(500, f"Database error: {str(e)}")
     
     @staticmethod
     def delete_producttype(prodtypeid: str, db: Session):

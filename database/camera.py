@@ -100,54 +100,47 @@ class CameraService:
         now = datetime.now()
 
         # Check updatedby (user id)
-        if camera.updatedby:
-            if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                              {"userid": camera.updatedby}).first():
-                return error_response(400, "Invalid user (updatedby)")
-            update_fields["updatedby"] = camera.updatedby
-
+        if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),{"userid": camera.updatedby}).first():
+            return error_response(400, "Invalid user (updatedby)")
+        
+        update_fields["cameraid"] = camera.cameraid
+        update_fields["updatedby"] = camera.updatedby
+        update_fields["updateddate"] = now
+        update_fields["update_cameraid"] = cameraid
+        
         # Check cameraid duplicate (not self)
-        if camera.cameraid and camera.cameraid != cameraid:
-            duplicate_check = db.execute(text("""
-                SELECT isdeleted FROM camera WHERE cameraid = :new_cameraid
-            """), {"new_cameraid": camera.cameraid}).first()
+        if camera.cameraid != cameraid:
+            duplicate_check = db.execute(
+                text("SELECT isdeleted FROM camera WHERE cameraid = :new_cameraid"), 
+                {"new_cameraid": camera.cameraid}).first()
 
             if duplicate_check:
                 if not duplicate_check.isdeleted:
                     return error_response(400, "New camera ID already exists")
                 else:
-                    # duplicate → delete record where isdeleted = true
                     db.execute(
-                        text("UPDATE camera SET isdeleted = true WHERE cameraid = :new_cameraid"),
-                        {"new_cameraid": camera.cameraid}
+                        text("UPDATE camera SET isdeleted = true WHERE cameraid = :old_cameraid"),
+                        {"old_cameraid": cameraid}
                     )
                     db.commit()
-
-            update_fields["cameraid"] = camera.cameraid
-
+                    update_fields["update_cameraid"] = camera.cameraid
+                    
         # field other
-        if camera.cameraname is not None:
-            update_fields["cameraname"] = camera.cameraname
-        if camera.cameralocation is not None:
-            update_fields["cameralocation"] = camera.cameralocation
-        if camera.camerastatus is not None:
-            update_fields["camerastatus"] = camera.camerastatus
-        if camera.updatedby:
-            update_fields["updatedby"] = camera.updatedby
+        if camera.cameraname is not None: update_fields["cameraname"] = camera.cameraname
+        if camera.cameralocation is not None: update_fields["cameralocation"] = camera.cameralocation
+        if camera.camerastatus is not None: update_fields["camerastatus"] = camera.camerastatus
+        update_fields["isdeleted"] = False
 
-        update_fields["updateddate"] = camera.updateddate or datetime.now()
+        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_cameraid"])
+        update_sql = text(f"UPDATE camera SET {set_clause} WHERE cameraid = :update_cameraid")
 
-        if not update_fields:
-          return error_response(400, "No fields to update")
-
-        update_fields["old_cameraid"] = cameraid
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_cameraid"])
-
-        update_sql = text(f"UPDATE camera SET {set_clause} WHERE cameraid = :old_cameraid")
-        db.execute(update_sql, update_fields)
-        db.commit()
-
-        return success_response(200, { "cameraid": update_fields.get("cameraid", cameraid), "updateddate": str(now)})
+        try:
+          db.execute(update_sql, update_fields)
+          db.commit()
+          return success_response(200, { "cameraid": update_fields.get("cameraid", cameraid), "updateddate": str(now)})
+        except Exception as e:
+            db.rollback()
+            return error_response(500, f"Database error: {str(e)}")
     
     @staticmethod
     def delete_camera(cameraid: str, db: Session):

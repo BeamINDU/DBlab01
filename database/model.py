@@ -16,10 +16,18 @@ def error_response(code: int, message: str):
 def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
-UPLOAD_FOLDER = "uploads/images" 
-
+UPLOAD_FOLDER = "/home/ubuntu/api/dataset/" 
 
 class DetectionModelDB:
+    def _fetch_one(self, query: str, params: dict):
+        try:
+            with engine.connect() as conn:
+              result = conn.execute(text(query), params)
+              return result.mappings().first()
+        except SQLAlchemyError as e:
+            print(f"Database error: {e}")
+            return []
+
     def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
@@ -35,17 +43,30 @@ class DetectionModelDB:
     def get_label_class(self):
         return self._fetch_all("SELECT * FROM labelclass")
     
-    def get_model_function(self, modelid: int):
-        return self._fetch_all("SELECT * FROM modelfunction WHERE modelid = :modelid", {"modelid": modelid})
+    def get_version(self, modelid: int):
+        result = self._fetch_all("SELECT versionno FROM modelversion WHERE modelid = :modelid ORDER BY versionno DESC", {"modelid": modelid})
+        # version_list = [int(row[0]) for row in result if row[0] is not None]
+        # next_version = (max(version_list) if version_list else 0) + 1
+        # version_list.insert(0, next_version)
+        return result
     
-    def get_model_version(self, modelid: int):
-        return self._fetch_all("SELECT * FROM modelversion WHERE modelid = :modelid", {"modelid": modelid})
+    def get_model_function(self, modelversionid: int):
+        return self._fetch_all("SELECT * FROM modelfunction WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
+    
+    def get_model_version(self, modelversionid: int):
+        return self._fetch_one("""
+            SELECT mv.*, m.modelname, m.modeldescription, c.prodid
+            FROM modelversion mv
+            LEFT JOIN model m ON mv.modelid = m.modelid
+            LEFT JOIN cameramodelprodapplied c on c.modelversionid  =  mv.modelversionid
+            WHERE mv.modelversionid = :modelversionid
+        """, {"modelversionid": modelversionid})
     
     def get_model_image(self, modelversionid: int):
         return self._fetch_all("SELECT * FROM image WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
 
     def get_model_camera(self, modelversionid: int):
-        return self._fetch_all("SELECT * FROM cameramodelprodapplied WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
+        return self._fetch_one("SELECT * FROM cameramodelprodapplied WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
 
 
 class DetectionModelService:
@@ -110,7 +131,7 @@ class DetectionModelService:
             "modelid": modelid,
             "versionno": 1,
             "modelstatus": "Processing",
-            "currentstep": 0,
+            "currentstep": 1,
             "createdby": model.createdby,
             "createddate": now
         })
@@ -119,19 +140,17 @@ class DetectionModelService:
         # Insert into 'cameramodelprodapplied'
         insert_prodid_sql = text("""
             INSERT INTO cameramodelprodapplied (
-                modelversionid, modelversionid
-                prodid, prodid
+                modelversionid, prodid, appliedstatus
             ) VALUES (
-                :modelversionid, :modelversionid
-                :prodid, :prodid
+                :modelversionid, :prodid, :appliedstatus
             )
-            RETURNING modelid
         """)
         db.execute(insert_prodid_sql, {
             "modelversionid": modelversionid,
+            "appliedstatus": False,
             "prodid": model.prodid,
         })
-        
+
         # ===== Return Section =====
         joined_sql = text("""
             SELECT 
@@ -147,8 +166,6 @@ class DetectionModelService:
               mv.createdby,
               mv.createddate
             FROM model m
-            LEFT JOIN modelfunction mf ON m.modelid = mf.modelid
-            LEFT JOIN function f ON mf.functionid = f.functionid
             JOIN (
                 SELECT *
                 FROM modelversion
@@ -156,6 +173,8 @@ class DetectionModelService:
                 ORDER BY versionno DESC
                 LIMIT 1
             ) mv ON m.modelid = mv.modelid
+            LEFT JOIN modelfunction mf ON mv.modelversionid = mf.modelversionid
+            LEFT JOIN function f ON mf.functionid = f.functionid
             LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
             WHERE m.modelid = :modelid
             GROUP BY 
@@ -189,39 +208,38 @@ class DetectionModelService:
     @staticmethod
     def get_model_detail(modelversionid: int, db: Session):
         sql = text("""
-           SELECT 
+          SELECT 
             m.modelid,
-            mv.modelversionid,
-            mv.modelstatus,
-            mv.versionno,
-            mv.currentstep,
-            cmp.prodid,
             m.modelname,
+            cmp.prodid,
             m.modeldescription,
-            ARRAY_AGG(DISTINCT f.functionid) AS functionids,
+            ARRAY_AGG(DISTINCT f.functionid) AS functions,
+            mv.modelversionid,
+            mv.versionno,
+            mv.modelstatus,
+            mv.currentstep,
             mv.trainpercent,
             mv.testpercent,
             mv.valpercent,
             mv.epochs
-        FROM modelversion mv
-        JOIN model m ON mv.modelid = m.modelid
-        LEFT JOIN modelfunction mf ON m.modelid = mf.modelid
-        LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
-        LEFT JOIN function f ON mf.functionid = f.functionid
-        WHERE mv.modelversionid = :modelversionid
-        GROUP BY 
-            m.modelid,
-            mv.modelversionid,
-            mv.versionno,
-            mv.modelstatus,
-            mv.currentstep,
-            cmp.prodid,
-            m.modelname,
-            m.modeldescription,
-            mv.trainpercent,
-            mv.testpercent,
-            mv.valpercent,
-            mv.epochs;
+          FROM model m
+          
+          JOIN (
+              SELECT *
+              FROM modelversion
+              WHERE modelid = :modelid
+              ORDER BY versionno DESC
+              LIMIT 1
+          ) mv ON m.modelid = mv.modelid
+          LEFT JOIN modelfunction mf ON mv.modelversionid = mf.modelversionid
+          LEFT JOIN function f ON mf.functionid = f.functionid
+          LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
+          WHERE m.modelversionid = :modelversionid
+          GROUP BY 
+              m.modelid, m.modelname, m.modeldescription,
+              mv.modelversionid, mv.versionno, mv.modelstatus, 
+              mv.currentstep, cmp.prodid, mv.trainpercent, 
+              mv.testpercent, mv.valpercent, mv.epochs
         """)
 
         row = db.execute(sql, {"modelversionid": modelversionid}).mappings().first()
@@ -237,40 +255,29 @@ class DetectionModelService:
     @staticmethod
     def get_detection_model(db: Session):
       sql = text("""
-          WITH latest_versions AS (
-              SELECT mv.*
-              FROM modelversion mv
-              INNER JOIN (
-                  SELECT modelid, MAX(versionno) AS max_version
-                  FROM modelversion
-                  GROUP BY modelid
-              ) latest ON mv.modelid = latest.modelid AND mv.versionno = latest.max_version
-          )
           SELECT 
-              m.modelid,
+			        mv.modelversionid,
+              mv.modelid,
               cmp.prodid,
               m.modelname,
               m.modeldescription,
               STRING_AGG(DISTINCT f.functionname, ', ') AS functionname,
-              lv.modelversionid,
-              lv.versionno,
-              lv.modelstatus,
-              lv.currentstep,
-              lv.createdby,
-              lv.createddate,
-              lv.updatedby,
-              lv.updateddate
-          FROM model m
-          LEFT JOIN modelfunction mf ON m.modelid = mf.modelid
+              mv.versionno,
+              mv.modelstatus,
+              mv.currentstep,
+              mv.createdby,
+              mv.createddate,
+              mv.updatedby,
+              mv.updateddate
+          FROM modelversion mv
+          LEFT JOIN model m ON m.modelid = mv.modelid
+          LEFT JOIN modelfunction mf ON mv.modelversionid = mf.modelversionid
           LEFT JOIN function f ON mf.functionid = f.functionid
-          LEFT JOIN latest_versions lv ON m.modelid = lv.modelid
-          LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = lv.modelversionid
+          LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
           GROUP BY 
-              m.modelid, cmp.prodid, m.modelname, m.modeldescription,
-              lv.modelversionid, lv.versionno, lv.modelstatus,
-              lv.currentstep, lv.createdby, lv.createddate,
-              lv.updatedby, lv.updateddate
-          ORDER BY m.modelid
+              mv.modelversionid, m.modelid, cmp.prodid, m.modelname, m.modeldescription,
+              mv.versionno, mv.modelstatus, mv.currentstep, mv.createdby, mv.createddate,
+              mv.updatedby, mv.updateddate
       """)
 
       result = db.execute(sql).mappings().all()
@@ -288,112 +295,129 @@ class DetectionModelService:
         
     @staticmethod
     def update_model_step1(modelversionid: int, model: schemas.DetectionModelUpdateStep1, db: Session):
-      now = datetime.now()
-
-      # modelfunction
-      new_functions = set(model.functions or [])
-
-      # ดึง functionid เดิมจาก DB
-      existing_rows = db.execute(text("""
-          SELECT functionid FROM modelfunction WHERE modelid = :modelid
-      """), {"modelid": model.modelid}).fetchall()
-      existing_functions = set(row[0] for row in existing_rows)
-
-      # หา function ที่ต้อง insert
-      to_insert = new_functions - existing_functions
-
-      # หา function ที่ต้อง delete
-      to_delete = existing_functions - new_functions
-
-      # Insert ใหม่
-      for functionid in to_insert:
-          db.execute(text("""
-              INSERT INTO modelfunction (modelid, functionid)
-              VALUES (:modelid, :functionid)
-          """), {"modelid": model.modelid, "functionid": functionid})
-
-      # ลบ function ที่ไม่ได้เลือกแล้ว
-      for functionid in to_delete:
-          db.execute(text("""
-              DELETE FROM modelfunction
-              WHERE modelid = :modelid AND functionid = :functionid
-          """), {"modelid": model.modelid, "functionid": functionid})
-
-      # Update modelversion
-      db.execute(text("""
-          UPDATE modelversion
-          SET currentstep = :currentstep,
-              updatedby = :updatedby,
-              updateddate = :updateddate
-          WHERE modelversionid = :modelversionid
-      """), {
-          "currentstep": "1",
-          "updatedby": model.updatedby,
-          "updateddate": now,
-          "modelversionid": modelversionid
-      })
-      db.commit()
-      return success_response(200, {"modelversionid": modelversionid, "updateddate": str(now)})
-    
-    @staticmethod
-    def update_model_step2(modelversionid: int, modelid: int, updatedby: str, files: List[UploadFile], db: Session):
         now = datetime.now()
-        image_data = []
-        folder = f"modelversion_{modelversionid}"
-
-        # Insert image
-        for file in files:
-            # Save file
-            image_path = DetectionModelService.save_image_file(file, folder)
-
-            # Insert with RETURNING imageid
-            result = db.execute(text("""
-                INSERT INTO image (
-                    imagepath, folder, modelversionid, imagename
-                ) VALUES (
-                    :imagepath, :folder, :modelversionid, :imagename
-                )
-                RETURNING imageid
-            """), {
-                "imagepath": image_path,
-                "folder": folder,
-                "modelversionid": modelversionid,
-                "imagename": file.filename,
-            })
-
-            imageid = result.scalar()
-
-            image_data.append({
-                "imageid": imageid,
-                "imagename": file.filename,
-                "imagepath": image_path
-            })
-    
-        # Update modelversion
-        db.execute(text("""
-            UPDATE modelversion
-            SET currentstep = :currentstep,
-                updatedby = :updatedby,
-                updateddate = :updateddate
-            WHERE modelversionid = :modelversionid
-        """), {
-            "currentstep": "2",
-            "updatedby": updatedby,
-            "updateddate": now,
-            "modelversionid": modelversionid
-        })
         
+        modelversion = db.execute(text("""
+            SELECT modelid, modelstatus, versionno FROM modelversion WHERE modelversionid = :modelversionid
+        """), {"modelversionid": modelversionid}).first()
+
+        if not modelversion:
+            return error_response(404, "Model version not found")
+
+        if modelversion.modelstatus == 'Processing':
+            versionno = modelversion.versionno
+            new_functions = set(model.functions or [])
+
+            existing_rows = db.execute(text("""
+                SELECT functionid FROM modelfunction WHERE modelversionid = :modelversionid
+            """), {"modelversionid": modelversionid}).fetchall()
+            existing_functions = set(row[0] for row in existing_rows)
+
+            to_insert = new_functions - existing_functions
+            to_delete = existing_functions - new_functions
+
+            for functionid in to_insert:
+                db.execute(text("""
+                    INSERT INTO modelfunction (modelversionid, functionid)
+                    VALUES (:modelversionid, :functionid)
+                """), {"modelversionid": modelversionid, "functionid": functionid})
+
+            for functionid in to_delete:
+                db.execute(text("""
+                    DELETE FROM modelfunction
+                    WHERE modelversionid = :modelversionid AND functionid = :functionid
+                """), {"modelversionid": modelversionid, "functionid": functionid})
+
+            db.execute(text("""
+                UPDATE modelversion
+                SET currentstep = :currentstep,
+                    updatedby = :updatedby,
+                    updateddate = :updateddate
+                WHERE modelversionid = :modelversionid
+            """), {
+                "currentstep": 2,
+                "updatedby": model.updatedby,
+                "updateddate": now,
+                "modelversionid": modelversionid
+            })
+
+        else:
+            cameramodelprodapplied = db.execute(text("""
+                SELECT prodid FROM cameramodelprodapplied WHERE modelversionid = :modelversionid
+            """), {"modelversionid": modelversionid}).first()
+
+            latest_version = db.execute(text("""
+                SELECT MAX(versionno) FROM modelversion WHERE modelid = :modelid
+            """), {"modelid": model.modelid}).scalar()
+
+            new_versionno = (latest_version or 0) + 1
+            versionno = new_versionno
+            prodid = cameramodelprodapplied.prodid
+            new_functions = set(model.functions or [])
+
+            # Insert new 'modelversion'
+            insert_version_sql = text("""
+                INSERT INTO modelversion (
+                    modelid, versionno, modelstatus,
+                    currentstep, createdby, createddate
+                ) VALUES (
+                    :modelid, :versionno, :modelstatus,
+                    :currentstep, :createdby, :createddate
+                )
+                RETURNING modelversionid
+            """)
+            version_result = db.execute(insert_version_sql, {
+                "modelid": model.modelid,
+                "versionno": new_versionno,
+                "modelstatus": "Processing",
+                "currentstep": 2,
+                "createdby": model.updatedby,
+                "createddate": now
+            })
+            modelversionid = version_result.scalar()
+
+            # Insert new 'modelfunction'
+            for functionid in new_functions:
+                db.execute(text("""
+                    INSERT INTO modelfunction (modelversionid, functionid)
+                    VALUES (:modelversionid, :functionid)
+                """), {"modelversionid": modelversionid, "functionid": functionid})
+
+            # Insert new 'cameramodelprodapplied'
+            db.execute(text("""
+                INSERT INTO cameramodelprodapplied (
+                    modelversionid, prodid, appliedstatus
+                ) VALUES (
+                    :modelversionid, :prodid, :appliedstatus
+                )
+            """), {
+                "modelversionid": modelversionid,
+                "prodid": prodid,
+                "appliedstatus": False
+            })
+
         db.commit()
         return success_response(200, {
             "modelversionid": modelversionid,
-            "images": image_data
+            "versionno": versionno
         })
-
+ 
     @staticmethod
-    def update_model_step3(modelversionid: int, model: schemas.DetectionModelUpdateStep3, db: Session):
+    def update_model_step2(modelversionid: int, model: schemas.DetectionModelUpdateStep2, db: Session):
       now = datetime.now()
+      
+      # Update 'cameramodelprodapplied'
+      db.execute(text("""
+          UPDATE cameramodelprodapplied
+          SET prodid = :prodid,
+              appliedstatus = :appliedstatus,
+          WHERE modelversionid = :modelversionid
+      """), {
+          "prodid": model.prodid,
+          "appliedstatus": False,
+      })
 
-      # Update model
+      # Update 'model'
       db.execute(text("""
           UPDATE model
           SET modelname = :modelname,
@@ -409,7 +433,7 @@ class DetectionModelService:
           "modelid": model.modelid
       })
 
-      # Update modelversion
+      # Update 'modelversion'
       db.execute(text("""
           UPDATE modelversion
           SET trainpercent = :trainpercent,
@@ -426,34 +450,56 @@ class DetectionModelService:
           "valpercent": model.valpercent,
           "valpercent": model.valpercent,
           "epochs": model.epochs,
-          "currentstep": "3",
+          "currentstep": 3,
           "updatedby": model.updatedby,
           "updateddate": now,
           "modelversionid": modelversionid
       })
-      return success_response(200, {"modelversionid": modelversionid, "updateddate": str(now)})
+      
+      return success_response(200, {"modelversionid": modelversionid})
     
+    @staticmethod
+    def update_model_step3(modelversionid: int, model: schemas.DetectionModelUpdateStep3, db: Session):
+        now = datetime.now()
+
+        # Update 'modelversion'
+        db.execute(text("""
+            UPDATE modelversion
+            SET currentstep = :currentstep,
+                updatedby = :updatedby,
+                updateddate = :updateddate
+            WHERE modelversionid = :modelversionid
+        """), {
+            "currentstep": 3,
+            "updatedby": model.updatedby,
+            "updateddate": now,
+            "modelversionid": modelversionid
+        })
+        
+        db.commit()
+        return success_response(200, {"modelversionid": modelversionid })
+
     @staticmethod
     def update_model_step4(modelversionid: int, model: schemas.DetectionModelUpdateStep4, db: Session):
       now = datetime.now()
 
-      # Update cameramodelprodapplied
+      # Update 'cameramodelprodapplied'
       db.execute(text("""
           UPDATE cameramodelprodapplied
           SET cameraid = :cameraid,
-              status = :status,
+              appliedstatus = :appliedstatus,
               applieddate = :applieddate,
               appliedby = :appliedby
           WHERE modelversionid = :modelversionid
       """), {
           "cameraid": model.cameraid,
-          "status": "active",
+          "appliedstatus": "active",
           "applieddate": now,
           "appliedby": model.updatedby,
           "modelversionid": modelversionid
       })
 
-      # Update modelversion ปัจจุบันให้เป็น "Using"
+      # Update 'modelversion' ปัจจุบันให้เป็น "Using"
       db.execute(text("""
           UPDATE modelversion
           SET versionno = :versionno,
@@ -464,26 +510,64 @@ class DetectionModelService:
           WHERE modelversionid = :modelversionid
       """), {
           "versionno": model.versionno,
-          "currentstep": "4",
+          "currentstep": 4,
           "modelstatus": "Using",
           "updatedby": model.updatedby,
           "updateddate": now,
           "modelversionid": modelversionid
       })
 
-      # Update modelversion อื่นที่มี modelid เดียวกัน แต่ไม่ใช่ตัวปัจจุบัน ให้เป็น "Ready"
+      # Update 'modelversion' อื่นที่มี modelid เดียวกัน แต่ไม่ใช่ตัวปัจจุบัน ให้เป็น "Ready"
       db.execute(text("""
           UPDATE modelversion
           SET modelstatus = 'Ready'
-          WHERE modelid = :modelid
-            AND modelversionid != :modelversionid
+          WHERE modelstatus != 'Processing'
+            AND modelid = :modelid
+            AND modelversionid != :modelversionid          
       """), {
           "modelid": model.modelid,
           "modelversionid": modelversionid
       })
-      db.commit()
-      return success_response(200, {"modelversionid": modelversionid, "updateddate": str(now)})
 
+      db.commit()
+      return success_response(200, {"modelversionid": modelversionid, "currentstep": 3})
+
+
+    # def update_model_step3(modelversionid: int, modelid: int, updatedby: str, files: UploadFile, db: Session):
+        # now = datetime.now()
+
+        # image_data = []
+        # folder = f"modelversion_{modelversionid}"
+
+        # Insert image
+        # for file in files:
+        #     # Save file
+        #     image_path = DetectionModelService.save_image_file(file, folder)
+
+        #     # Insert with RETURNING imageid
+        #     result = db.execute(text("""
+        #         INSERT INTO image (
+        #             imagepath, folder, modelversionid, imagename
+        #         ) VALUES (
+        #             :imagepath, :folder, :modelversionid, :imagename
+        #         )
+        #         RETURNING imageid
+        #     """), {
+        #         "imagepath": image_path,
+        #         "folder": folder,
+        #         "modelversionid": modelversionid,
+        #         "imagename": file.filename,
+        #     })
+
+        #     imageid = result.scalar()
+
+        #     image_data.append({
+        #         "imageid": imageid,
+        #         "imagename": file.filename,
+        #         "imagepath": image_path
+        #     })
+    
+        
 
 
   

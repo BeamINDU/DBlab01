@@ -3,6 +3,18 @@ from fastapi import HTTPException
 import database.schemas as schemas
 
 class MenuDB:
+    def _fetch_all(self, query: str):
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text(query))
+                return [dict(row) for row in result.mappings()]
+        except SQLAlchemyError as e:
+            print(f"Database error: {e}")
+            return []
+
+    def get_menu(self):
+        return self._fetch_all("SELECT * FROM menu")
+
     def add_menu(self, menu: schemas.MenuCreate, db: Session):
         # Check if menuid already exists
         if db.execute(text("SELECT 1 FROM menu WHERE menuid = :menuid"), {"menuid": menu.menuid}).first():

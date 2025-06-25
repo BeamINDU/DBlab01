@@ -118,61 +118,68 @@ class UserService:
         
         update_fields = {}
         now = datetime.now()
+        update_fields["userid"] = user.userid
+        update_fields["updateddate"] = now
+        update_fields["update_userid"] = userid
 
         # Check updatedby (user id)
-        if user.updatedby:
-            if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
-                              {"userid": user.updatedby}).first():
-                return error_response(400, "Invalid user (updatedby)")
-            update_fields["updatedby"] = user.updatedby
+        if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
+                          {"userid": user.updatedby}).first():
+            return error_response(400, "Invalid user (updatedby)")
+        update_fields["updatedby"] = user.updatedby
 
+        # Check username duplicate
+        duplicate_user = db.execute(text("""
+            SELECT 1 FROM "user"
+            WHERE username = :username
+              AND userid != :userid
+        """), {
+            "username": user.username,
+            "userid": userid
+        }).first()
 
-        # Check userid duplicate (not self)
-        if user.userid and user.userid != userid:
-            duplicate_check = db.execute(text("""
-                SELECT isdeleted FROM \"user\" WHERE userid = :new_userid
-            """), {"new_userid": user.userid}).first()
+        if duplicate_user:
+            return error_response(400, f"Username '{user.username}' already exists")
+
+        # Check userid duplicate
+        if user.userid != userid:
+            duplicate_check = db.execute(
+                text("SELECT isdeleted FROM \"user\" WHERE userid = :new_userid"), 
+                {"new_userid": user.userid}).first()
 
             if duplicate_check:
                 if not duplicate_check.isdeleted:
-                    return error_response(400, "New User ID already exists")
-                else:
-                    # duplicate → delete record where isdeleted = true
-                    db.execute(
-                        text("UPDATE \"user\" SET isdeleted = true WHERE userid = :new_userid"),
-                        {"new_userid": user.userid}
-                    )
-                    db.commit()
-
-            update_fields["userid"] = user.userid
+                     return error_response(400, f"User ID '{user.userid}' already exists")
+                # else:
+                #     db.execute(
+                #         text("UPDATE \"user\" SET isdeleted = true WHERE userid = :old_userid"),
+                #         {"old_userid": userid}
+                #     )
+                #     db.commit()
+                #     update_fields["update_userid"] = user.userid
             
         # field other
-        if user.ufname is not None:
-            update_fields["ufname"] = user.ufname
-        if user.ulname is not None:
-            update_fields["ulname"] = user.ulname
-        if user.username is not None:
-            update_fields["username"] = user.username
-        if user.upassword is not None:
-            update_fields["upassword"] = user.upassword
-        if user.email is not None:
-            update_fields["email"] = user.email
-        if user.userstatus is not None:
-            update_fields["userstatus"] = user.userstatus
-
-        update_fields["updateddate"] = now
+        if user.ufname is not None: update_fields["ufname"] = user.ufname
+        if user.ulname is not None: update_fields["ulname"] = user.ulname
+        if user.username is not None: update_fields["username"] = user.username
+        if user.upassword is not None: update_fields["upassword"] = user.upassword
+        if user.email is not None: update_fields["email"] = user.email
+        if user.userstatus is not None: update_fields["userstatus"] = user.userstatus
+        update_fields["isdeleted"] = False
 
         if not update_fields:
           return error_response(400, "No fields to update")
 
-        update_fields["old_userid"] = userid
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "old_userid"])
+        set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_userid"])
+        update_sql = text(f'UPDATE "user" SET {set_clause} WHERE userid = :update_userid')
 
-        update_sql = text(f'UPDATE "user" SET {set_clause} WHERE userid = :old_userid')
-        db.execute(update_sql, update_fields)
-        db.commit()
-
-        return success_response(200, { "userid": update_fields.get("userid", userid), "updateddate": str(now)})
+        try:
+          db.execute(update_sql, update_fields)
+          db.commit()
+          return success_response(200, { "userid": update_fields.get("userid", userid), "updateddate": str(now)})
+        except Exception as e:
+            db.rollback()
+            return error_response(500, f"Database error: {str(e)}")
     
     @staticmethod
     def delete_user(userid: str, db: Session):
