@@ -4,22 +4,19 @@ import database.schemas as schemas
 
 class PermissionDB:
     def get_permission(self, roleid: int, db: Session):
-        """Get permissions by role ID"""
         try:
-            # Query เพื่อดึง permission ตาม roleid
             query = text("""
                 SELECT DISTINCT
-                    p.permissionid,
-                    p.menuid,
-                    p.actionid,
+                    rp.roleid,
+                    rp.menuid,
+                    rp.actionid,
                     m.menuname,
                     m.parentid,
                     m.seq,
                     m.path,
                     m.icon
-                FROM permission p
-                JOIN menu m ON p.menuid = m.menuid
-                JOIN rolepermission rp ON p.permissionid = rp.permissionid
+                FROM rolepermission rp
+                JOIN menu m ON rp.menuid = m.menuid
                 WHERE rp.roleid = :roleid
                 ORDER BY m.seq
             """)
@@ -27,26 +24,32 @@ class PermissionDB:
             result = db.execute(query, {"roleid": roleid})
             permissions = result.fetchall()
             
-            # Convert to dict format
             permission_list = []
             for row in permissions:
+                # แปลง actionid string เป็น array of integers
+                actionid_str = str(row.actionid)
+                if ',' in actionid_str:
+                    # "1,2,3,4,5,6" → [1,2,3,4,5,6]
+                    actions = [int(x.strip()) for x in actionid_str.split(',') if x.strip().isdigit()]
+                else:
+                    # "1" → [1]
+                    actions = [int(actionid_str)] if actionid_str.isdigit() else [1]
+                
                 permission_list.append({
-                    "permissionid": row.permissionid,
                     "menuid": row.menuid,
                     "menuname": row.menuname,
                     "parentid": row.parentid or "",
                     "seq": row.seq,
                     "path": row.path or "",
                     "icon": row.icon or "",
-                    "actionid": row.actionid,
-                    "actions": [row.actionid]  
+                    "actionid": actions[0] if actions else 1,  # First action as int
+                    "actions": actions  # Array of integers
                 })
             
             return {"permissions": permission_list}
             
         except Exception as e:
             print(f"Error in get_permission: {str(e)}")
-            # Return empty if error
             return {"permissions": []}
 
     def add_permission(self, perm: schemas.PermissionCreate, db: Session):

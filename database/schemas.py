@@ -3,19 +3,18 @@ from typing import Optional, List
 from datetime import datetime
 
 class RoleCreate(BaseModel):
-    # roleid: int = Field(alias="roleId")
     rolename: str = Field(alias="roleName")
     roledescription: Optional[str] = Field(default=None, alias="description")
     rolestatus: Optional[bool] = Field(default=True, alias="status")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
+    # createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
 
 class RoleUpdate(BaseModel):
     rolename: Optional[str] = Field(default=None, alias="roleName")
     roledescription: Optional[str] = Field(default=None, alias="description")
     rolestatus: Optional[bool] = Field(default=None, alias="status")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class ProductCreate(BaseModel):
     prodid: str = Field(alias="productId")
@@ -24,9 +23,7 @@ class ProductCreate(BaseModel):
     prodserial: Optional[str] = Field(default=None, alias="serialNo")
     prodstatus: Optional[bool] = Field(default=True, alias="status")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
+    # createddate: Optional[datetime] = Field(default=None, alias="createdDate")
 
 class ProductUpdate(BaseModel):
     prodid: str = Field(alias="productId")
@@ -35,10 +32,8 @@ class ProductUpdate(BaseModel):
     prodtype: Optional[str] = Field(default=None, alias="productType")
     prodserial: Optional[str] = Field(default=None, alias="serialNo")
     prodstatus: Optional[bool] = Field(default=None, alias="status")
-    createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class ProdTypeCreate(BaseModel):
     prodtypeid: str = Field(alias="productTypeId")
@@ -46,7 +41,7 @@ class ProdTypeCreate(BaseModel):
     proddescription: Optional[str] = Field(default=None, alias="description")
     prodstatus: Optional[bool] = Field(default=True, alias="status")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
+    # createddate: Optional[datetime] = Field(default=None, alias="createdDate")
 
 class ProdTypeUpdate(BaseModel):
     prodtypeid: str = Field(alias="productTypeId")
@@ -54,7 +49,7 @@ class ProdTypeUpdate(BaseModel):
     proddescription: Optional[str] = Field(default=None, alias="description")
     prodstatus: Optional[bool] = Field(default=None, alias="status")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class CameraCreate(BaseModel):
     cameraid: str = Field(alias="cameraId")
@@ -62,7 +57,7 @@ class CameraCreate(BaseModel):
     cameralocation: Optional[str] = Field(default=None, alias="location")
     camerastatus: Optional[bool] = Field(default=True, alias="status")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
+    # createddate: Optional[datetime] = Field(default=None, alias="createdDate")
 
 class CameraUpdate(BaseModel):
     cameraid: str = Field(alias="cameraId")
@@ -70,7 +65,7 @@ class CameraUpdate(BaseModel):
     cameralocation: Optional[str] = Field(default=None, alias="location")
     camerastatus: Optional[bool] = Field(default=None, alias="status")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class UserCreate(BaseModel):
     userid: str = Field(alias="userId")
@@ -82,9 +77,7 @@ class UserCreate(BaseModel):
     userstatus: Optional[bool] = Field(default=True, alias="status")
     roles: Optional[List[int]] = None
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
+    # createddate: Optional[datetime] = Field(default=None, alias="createdDate")
 
 class UserUpdate(BaseModel):
     userid: str = Field(alias="userId")
@@ -96,7 +89,7 @@ class UserUpdate(BaseModel):
     userstatus: Optional[bool] = Field(default=None, alias="status")
     roles: Optional[List[int]] = None
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DefectTypeCreate(BaseModel):
     defectid: str = Field(alias="defectTypeId")
@@ -104,9 +97,7 @@ class DefectTypeCreate(BaseModel):
     defectdescription: Optional[str] = Field(default=None, alias="description")
     defectstatus: Optional[bool] = Field(default=True, alias="status")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default=None, alias="createdDate")
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
+    # createddate: Optional[datetime] = Field(default=None, alias="createdDate")
 
 class DefectTypeUpdate(BaseModel):
     defectid: str = Field(alias="defectTypeId")
@@ -114,8 +105,7 @@ class DefectTypeUpdate(BaseModel):
     defectdescription: Optional[str] = Field(default=None, alias="description")
     defectstatus: Optional[bool] = Field(default=None, alias="status")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
-
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class PlanningCreate(BaseModel):
     planid: str = Field(alias="planId")
@@ -126,10 +116,6 @@ class PlanningCreate(BaseModel):
     startdatetime: datetime = Field(alias="startDate")
     enddatetime: datetime = Field(alias="endDate")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    # createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
-    # updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    # updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
-    # iscreatemode: Optional[bool] = Field(default=None, alias="isCreateMode")
 
 class PlanningUpdate(BaseModel):
     planid: str = Field(alias="planId")
@@ -139,69 +125,54 @@ class PlanningUpdate(BaseModel):
     quantity: int
     startdatetime: datetime = Field(alias="startDate")
     enddatetime: datetime = Field(alias="endDate")
-    createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
-    iscreatemode: Optional[bool] = Field(default=None, alias="isCreateMode")
 
 class DetectionModelCreate(BaseModel):
     modelname: str = Field(alias="modelName")
     modeldescription: Optional[str] = Field(default=None, alias="description")
     prodid: str = Field(alias="ProductId")
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
 
 class DetectionModelUpdate(BaseModel):
     modelid: int = Field(alias="modelId")
     modelname: Optional[str] = Field(default=None, alias="modelName")
     modeldescription: Optional[str] = Field(default=None, alias="description")
-    # version: Optional[int] = Field(default=None, alias="version")
-    # function: Optional[str] = Field(default=None, alias="function")
-    # status: Optional[str] = Field(default=None, alias="status")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep1(BaseModel):
-    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
     functions: Optional[List[int]] = Field(default=None, alias="functions")
-    # modelstatus: Optional[str] = Field(default=None, alias="status")
-    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep2(BaseModel):
-    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
     modelname: Optional[str] = Field(default=None, alias="modelName")
-    prodid: str = Field(alias="ProductId")
     modeldescription: Optional[str] = Field(default=None, alias="description")
     trainpercent: Optional[int] = Field(default=None, alias="trainDataset")
     testpercent: Optional[int] = Field(default=None, alias="testDataset")
     valpercent: Optional[int] = Field(default=None, alias="validationDataset")
     epochs: Optional[int] = Field(default=None, alias="epochs")
-    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    prodid: Optional[str] = Field(default=None, alias="ProductId")
+    cameraid: Optional[str] = Field(default=None, alias="cameraId")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep3(BaseModel):
-    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
-    base64: Optional[str]
-    annotate: Optional[str]
-    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class DetectionModelUpdateStep4(BaseModel):
-    # modelversionid: int = Field(alias="modelVersionId")
     modelid: int = Field(alias="modelId")
-    cameraid: Optional[int] = Field(default=None, alias="cameraId")
-    versionno: Optional[str] = Field(default=None, alias="version")
-    # currentstep: Optional[int] = Field(default=None, alias="currentStep")
+    versionno: Optional[int] = Field(default=None, alias="version")
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+
+class DetectionModelImage(BaseModel):
+    modelversionid: int = Field(alias="modelVersionId")
+    prodid: str = Field(alias="ProductId")
+    cameraid: Optional[int] = Field(default=None, alias="cameraId")
+    filename: Optional[str]
+    base64: Optional[str]
+    annotate: Optional[str]
+    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
 
 class TransactionCreate(BaseModel):
     runningno: int = Field(alias="runningNo")
@@ -211,9 +182,7 @@ class TransactionCreate(BaseModel):
     productid: str = Field(alias="productId")
     quantity: int
     createdby: Optional[str] = Field(default=None, alias="createdBy")
-    createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default=None, alias="updatedDate")
+    # createddate: Optional[datetime] = Field(default_factory=datetime.now, alias="createdDate")
 
 class TransactionUpdate(BaseModel):
     startdate: Optional[datetime] = Field(default=None, alias="startDate")
@@ -222,7 +191,7 @@ class TransactionUpdate(BaseModel):
     productid: Optional[str] = Field(default=None, alias="productId")
     quantity: Optional[int] = None
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
-    updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
+    # updateddate: Optional[datetime] = Field(default_factory=datetime.now, alias="updatedDate")
 
 class ReportDefectCreate(BaseModel):
     lotno: str = Field(alias="lotNo")
@@ -272,13 +241,35 @@ class ProductDetailCreate(BaseModel):
     history: List[HistoryItem]
 
 class PermissionCreate(BaseModel):
-    permissionid: int = Field(alias="permissionId")
-    menuid: str = Field(alias="menuId")
+    roleid: int = Field(alias="roleId")
+    menuid: str = Field(alias="menuId") 
     actionid: int = Field(alias="actionId")
 
+class PermissionItem(BaseModel):
+    menuId: str
+    actions: List[int]
+
 class PermissionUpdate(BaseModel):
-    menuid: Optional[str] = Field(default=None, alias="menuId")
-    actionid: Optional[int] = Field(default=None, alias="actionId")
+    roleid: int = Field(alias="roleId")
+    permissions: List[PermissionItem]
+    
+    # Example: {
+    #   "roleId": 1,
+    #   "permissions": [
+    #     {"menuId": "MD001", "actions": [1,2,3]},
+    #     {"menuId": "MD002", "actions": [1,4,5]}
+    #   ]
+    # }
+
+class PermissionResponse(BaseModel):
+    menuid: str = Field(alias="menuId")
+    menuname: str = Field(alias="menuName")
+    parentid: str = Field(alias="parentId")
+    seq: int
+    path: str
+    icon: str
+    actionid: int = Field(alias="actionId")
+    actions: List[int]
 
 class MenuCreate(BaseModel):
     menuid: str = Field(alias="menuId")

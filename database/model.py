@@ -18,6 +18,12 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
 
 UPLOAD_FOLDER = "/home/ubuntu/api/dataset/" 
 
+# Case
+# 1. ถ้า add new model, status = Processing
+# ถ้า edit version ที่มีอยู่แล้ว จะต้องส้ราง version ใหม่ (version ใหม่ status = Processing)
+# ถ้าตอน step 4 กด Finish ใช้ version ใหม่ที่เพิ่งสร้าง อันใหม่ status = Using และ version เก่า update status=Ready
+# ถ้าเทรน version ใหม่ แต่ไม่ใช้ ไปใช้ version เก่า status อันที่ทำอยู่ = Ready, version ที่ใช้ = Using
+
 class DetectionModelDB:
     def _fetch_one(self, query: str, params: dict):
         try:
@@ -47,18 +53,21 @@ class DetectionModelDB:
         return self._fetch_all("SELECT * FROM labelclass")
     
     def get_version(self, modelid: int):
-        result = self._fetch_all("SELECT versionno FROM modelversion WHERE modelid = :modelid ORDER BY versionno DESC", {"modelid": modelid})
-        # version_list = [int(row[0]) for row in result if row[0] is not None]
-        # next_version = (max(version_list) if version_list else 0) + 1
-        # version_list.insert(0, next_version)
-        return result
+      result = self._fetch_all(
+          "SELECT versionno FROM modelversion WHERE modelid = :modelid ORDER BY versionno DESC",
+          {"modelid": modelid}
+      )
+      version_list = [row['versionno'] for row in result if row['versionno'] is not None]
+      next_version = (max(version_list) if version_list else 0) + 1
+      version_list.insert(0, next_version)
+      return version_list
     
     def get_model_function(self, modelversionid: int):
         return self._fetch_all("SELECT * FROM modelfunction WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
     
     def get_model_version(self, modelversionid: int):
         return self._fetch_one("""
-            SELECT mv.*, m.modelname, m.modeldescription, c.prodid
+            SELECT mv.*, m.modelname, m.modeldescription, c.prodid, c.cameraid
             FROM modelversion mv
             LEFT JOIN model m ON mv.modelid = m.modelid
             LEFT JOIN cameramodelprodapplied c on c.modelversionid  =  mv.modelversionid
@@ -93,16 +102,6 @@ class DetectionModelDB:
 
 
 class DetectionModelService:
-    @staticmethod
-    def save_image_file(file: UploadFile, folder: str) -> str:
-        folder_path = os.path.join(UPLOAD_FOLDER, folder)
-        os.makedirs(folder_path, exist_ok=True)
-
-        file_path = os.path.join(folder_path, file.filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        return file_path
     
     @staticmethod
     def add_model(model: schemas.DetectionModelCreate, db: Session):
@@ -357,7 +356,7 @@ class DetectionModelService:
                     updateddate = :updateddate
                 WHERE modelversionid = :modelversionid
             """), {
-                "currentstep": 2,
+                "currentstep": 1,
                 "updatedby": model.updatedby,
                 "updateddate": now,
                 "modelversionid": modelversionid
@@ -419,10 +418,7 @@ class DetectionModelService:
             })
 
         db.commit()
-        return success_response(200, {
-            "modelversionid": modelversionid,
-            "versionno": versionno
-        })
+        return success_response(200, { "modelversionid": modelversionid, "versionno": versionno })
  
     @staticmethod
     def update_model_step2(modelversionid: int, model: schemas.DetectionModelUpdateStep2, db: Session):
@@ -431,12 +427,15 @@ class DetectionModelService:
       # Update 'cameramodelprodapplied'
       db.execute(text("""
           UPDATE cameramodelprodapplied
-          SET prodid = :prodid,
-              appliedstatus = :appliedstatus,
+          SET cameraid = :cameraid,
+              prodid = :prodid,
+              appliedstatus = :appliedstatus
           WHERE modelversionid = :modelversionid
       """), {
+          "cameraid": model.cameraid,
           "prodid": model.prodid,
           "appliedstatus": False,
+          "modelversionid": modelversionid
       })
 
       # Update 'model'
@@ -459,25 +458,25 @@ class DetectionModelService:
       db.execute(text("""
           UPDATE modelversion
           SET trainpercent = :trainpercent,
-              valpercent = :valpercent,
+              testpercent = :testpercent,
               valpercent = :valpercent,
               epochs = :epochs,
               currentstep = :currentstep,
               updatedby = :updatedby,
-              updateddate = :updateddate,
-              modelstatus = :modelstatus
+              updateddate = :updateddate
           WHERE modelversionid = :modelversionid
       """), {
           "trainpercent": model.trainpercent,
-          "valpercent": model.valpercent,
+          "testpercent": model.testpercent,
           "valpercent": model.valpercent,
           "epochs": model.epochs,
-          "currentstep": 3,
+          "currentstep": 2,
           "updatedby": model.updatedby,
           "updateddate": now,
           "modelversionid": modelversionid
       })
       
+      db.commit()
       return success_response(200, {"modelversionid": modelversionid})
     
     @staticmethod
@@ -508,14 +507,12 @@ class DetectionModelService:
       # Update 'cameramodelprodapplied'
       db.execute(text("""
           UPDATE cameramodelprodapplied
-          SET cameraid = :cameraid,
-              appliedstatus = :appliedstatus,
+          SET appliedstatus = :appliedstatus,
               applieddate = :applieddate,
               appliedby = :appliedby
           WHERE modelversionid = :modelversionid
       """), {
-          "cameraid": model.cameraid,
-          "appliedstatus": "active",
+          "appliedstatus": True,
           "applieddate": now,
           "appliedby": model.updatedby,
           "modelversionid": modelversionid
@@ -543,8 +540,8 @@ class DetectionModelService:
       db.execute(text("""
           UPDATE modelversion
           SET modelstatus = 'Ready'
-          WHERE modelstatus != 'Processing'
-            AND modelid = :modelid
+          WHERE modelid = :modelid
+            AND modelstatus != 'Processing'
             AND modelversionid != :modelversionid          
       """), {
           "modelid": model.modelid,
@@ -552,44 +549,55 @@ class DetectionModelService:
       })
 
       db.commit()
-      return success_response(200, {"modelversionid": modelversionid, "currentstep": 3})
+      return success_response(200, {"modelversionid": modelversionid})
 
+    @staticmethod
+    def save_image_file(file: UploadFile, folder: str) -> str:
+        folder_path = os.path.join(UPLOAD_FOLDER, folder)
+        os.makedirs(folder_path, exist_ok=True)
 
-    # def update_model_step3(modelversionid: int, modelid: int, updatedby: str, files: UploadFile, db: Session):
-        # now = datetime.now()
+        file_path = os.path.join(folder_path, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-        # image_data = []
-        # folder = f"modelversion_{modelversionid}"
-
-        # Insert image
-        # for file in files:
-        #     # Save file
-        #     image_path = DetectionModelService.save_image_file(file, folder)
-
-        #     # Insert with RETURNING imageid
-        #     result = db.execute(text("""
-        #         INSERT INTO image (
-        #             imagepath, folder, modelversionid, imagename
-        #         ) VALUES (
-        #             :imagepath, :folder, :modelversionid, :imagename
-        #         )
-        #         RETURNING imageid
-        #     """), {
-        #         "imagepath": image_path,
-        #         "folder": folder,
-        #         "modelversionid": modelversionid,
-        #         "imagename": file.filename,
-        #     })
-
-        #     imageid = result.scalar()
-
-        #     image_data.append({
-        #         "imageid": imageid,
-        #         "imagename": file.filename,
-        #         "imagepath": image_path
-        #     })
+        return file_path
     
-        
+    @staticmethod
+    def annotate_image(model: schemas.DetectionModelImage, db: Session):
+        image_data = []
+
+        folder = f"{model.prodid}/{model.cameraId}/{model.modelversionid}/{model.filename}"
+
+        # Save file
+        image_path = DetectionModelService.save_image_file(model.base64, folder)
+
+        # Insert with RETURNING imageid
+        result = db.execute(text("""
+            INSERT INTO image (
+                modelversionid, imagename, imagepath, folder, annotate
+            ) VALUES (
+                :modelversionid, :imagename, :imagepath, :folder, :annotate
+            )
+            RETURNING imageid
+        """), {
+            "modelversionid": model.modelversionid,
+            "imagename": model.filename,
+            "imagepath": image_path,
+            "folder": folder,
+            "annotate": model.annotate
+        })
+
+        imageid = result.scalar()
+
+        image_data.append({
+            "imageid": imageid,
+            "imagename": model.filename,
+            "imagepath": image_path,
+            "folder": folder,
+        })
+    
+        db.commit()
+        return success_response(200, image_data)
 
 
   
@@ -597,8 +605,3 @@ class DetectionModelService:
 
 
 
-# Case
-# 1. ถ้า add new model, status = Processing
-# ถ้า edit version ที่มีอยู่แล้ว จะต้องส้ราง version ใหม่ (version ใหม่ status = Processing)
-# ถ้าตอน step 4 กด Finish ใช้ version ใหม่ที่เพิ่งสร้าง อันใหม่ status = Using และ version เก่า update status=Ready
-# ถ้าเทรน version ใหม่ แต่ไม่ใช้ ไปใช้ version เก่า status อันที่ทำอยู่ = Ready, version ที่ใช้ = Using

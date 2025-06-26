@@ -454,7 +454,6 @@ def suggest_plan_lineid(q: str):
         raise HTTPException(status_code=500, detail=str(e))
     
 # -------------------- Detection Model Service --------------------
-
 @app.get("/suggest-modelname", tags=["Model"])
 def suggest_modelname(q: str):
     try:
@@ -573,20 +572,30 @@ def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateS
         return DetectionModelService().update_model_step4(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
-   
-# @app.post("/update-model-step3", tags=["Model"])
+    
+
+@app.put("/annotate-image", tags=["Model"])
+def annotate_image(modelversionid: str, model: schemas.DetectionModelImage, db: Session = Depends(get_db)):
+    try:
+        return DetectionModelService().annotate_image(modelversionid, model, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
+       
+# @app.post("/upload-annotate-image", tags=["Model"])
 # def update_model_step2(
 #     modelversionid: int = Form(...),
-#     modelid: int = Form(...),
+#     prodid: int = Form(...),
+#     cameraid: int = Form(...),
+#     filename: str = Form(...),
+#     annotate: str = Form(...),
 #     updatedby: str = Form(...),
-#     files: List[UploadFile] = File(...),
+#     file: UploadFile = File(...)
 #     db: Session = Depends(get_db)
 # ):
 #   try:
-#     return DetectionModelService().update_model_step2(modelversionid, modelid, updatedby, files, db)
+#     return DetectionModelService().update_model_step2(modelversionid, prodid, cameraid, filename, annotate, updatedby, file, db)
 #   except Exception as e:
 #       raise HTTPException(status_code=500, detail=str(e))
-
     
 # -------------------- Transaction Service --------------------
 @app.get("/transaction", tags=["Transaction"])
@@ -682,11 +691,11 @@ def get_permission(roleid: int, db: Session = Depends(get_db)):
         return PermissionDB().get_permission(roleid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.put("/update_permission", tags=["Permission"])
-def update_permission(permissionid: int, perm: schemas.PermissionUpdate, db: Session = Depends(get_db)):
+
+@app.put("/update_permission", tags=["Permission"]) 
+def update_permission(roleid: int, permissions_data: dict, db: Session = Depends(get_db)):
     try:
-        return PermissionDB().update_permission(permissionid, perm, db)
+        return PermissionDB().update_permissions(roleid, permissions_data, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
