@@ -13,7 +13,7 @@ class MenuDB:
             return []
 
     def get_menu(self):
-        return self._fetch_all("SELECT * FROM menu")
+        return self._fetch_all("SELECT * FROM menu ORDER BY seq")
 
     def add_menu(self, menu: schemas.MenuCreate, db: Session):
         # Check if menuid already exists

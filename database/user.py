@@ -75,6 +75,7 @@ class UserService:
         ).first()
 
         now = datetime.now()
+        if user.upassword is None: user.upassword = user.username
 
         if existing_user:
             if not existing_user.isdeleted:  # isdeleted = False

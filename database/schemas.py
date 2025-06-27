@@ -241,35 +241,13 @@ class ProductDetailCreate(BaseModel):
     history: List[HistoryItem]
 
 class PermissionCreate(BaseModel):
-    roleid: int = Field(alias="roleId")
-    menuid: str = Field(alias="menuId") 
+    permissionid: int = Field(alias="permissionId")
+    menuid: str = Field(alias="menuId")
     actionid: int = Field(alias="actionId")
-
-class PermissionItem(BaseModel):
-    menuId: str
-    actions: List[int]
 
 class PermissionUpdate(BaseModel):
-    roleid: int = Field(alias="roleId")
-    permissions: List[PermissionItem]
-    
-    # Example: {
-    #   "roleId": 1,
-    #   "permissions": [
-    #     {"menuId": "MD001", "actions": [1,2,3]},
-    #     {"menuId": "MD002", "actions": [1,4,5]}
-    #   ]
-    # }
-
-class PermissionResponse(BaseModel):
-    menuid: str = Field(alias="menuId")
-    menuname: str = Field(alias="menuName")
-    parentid: str = Field(alias="parentId")
-    seq: int
-    path: str
-    icon: str
-    actionid: int = Field(alias="actionId")
-    actions: List[int]
+    menuid: Optional[str] = Field(default=None, alias="menuId")
+    actionid: Optional[int] = Field(default=None, alias="actionId")
 
 class MenuCreate(BaseModel):
     menuid: str = Field(alias="menuId")

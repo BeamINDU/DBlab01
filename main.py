@@ -140,48 +140,96 @@ def suggest_username(q: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Role Service --------------------
+
 @app.get("/roles", tags=["Role"])
-def roles():
+def get_roles():
+    """Get all roles"""
     try:
         return {"roles": role_db.get_roles()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-role", tags=["Role"])
-def add_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
+@app.get("/roles/{role_id}", tags=["Role"])
+def get_role(role_id: int):
+    """Get single role by ID"""
+    try:
+        return role_db.get_role(role_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/roles", tags=["Role"])
+def create_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
+    """Create new role"""
     try:
         return role_db.add_role(role, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/update-role", tags=["Role"])
-def update_role(roleid: str, role: schemas.RoleUpdate, db: Session = Depends(get_db)):
+@app.put("/roles/{role_id}", tags=["Role"])
+def update_role(role_id: int, role: schemas.RoleUpdate, db: Session = Depends(get_db)):
+    """Update role by ID"""
     try:
-        return role_db.update_role(roleid, role, db)
+        return role_db.update_role(str(role_id), role, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/delete-role", tags=["Role"])
-def delete_role_api(roleid: str, db: Session = Depends(get_db)):
+@app.delete("/roles/{role_id}", tags=["Role"])
+def delete_role(role_id: int, db: Session = Depends(get_db)):
+    """Delete role by ID"""
     try:
-        return role_db.delete_role(roleid, db)
+        return role_db.delete_role(str(role_id), db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.post("/upload-roles", tags=["Role"])
+
+@app.post("/roles/upload", tags=["Role"])
 async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload roles from file"""
     try:
         return role_db.upload_roles(uploadby, file, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/suggest-role-name", tags=["Role"])
-def suggest_role_name(q: str):
+
+@app.get("/roles/suggestions", tags=["Role"])
+def get_role_suggestions(q: str):
+    """Get role name suggestions"""
     try:
         return role_db.suggest_role_name(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/roles/{role_id}/permissions", tags=["Role"])
+def get_role_permissions(role_id: int, db: Session = Depends(get_db)):
+    try:
+        return role_db.get_role_permissions(role_id, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/roles/{role_id}/permissions", tags=["Role"])
+def update_role_permissions(role_id: int, permissions_data: dict, db: Session = Depends(get_db)):
+
+    try:
+        return role_db.update_role_permissions(role_id, permissions_data, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/update-role-permissions", tags=["Role"]) 
+def update_role_permissions(roleid: int, permissions_data: dict, db: Session = Depends(get_db)):
+    try:
+        print(f"Received update-role-permissions request for roleId: {roleid}")
+        print(f"Request data: {permissions_data}")
+        
+        result = role_db.update_role_permissions(roleid, permissions_data, db)
+        
+        print(f"Role permissions update successful for roleId: {roleid}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update-role-permissions endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
 # -------------------- Product Service --------------------
 @app.get("/products", tags=["Product"])
 def products():
@@ -685,46 +733,26 @@ def update_report_product(productid: str, item: schemas.ReportProductUpdate, db:
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Permission Service --------------------
-@app.put("/permissions", tags=["Permission"])
-def get_permission(roleid: int, db: Session = Depends(get_db)):
+@app.get("/user-permissions", tags=["Permission"])
+def user_permission(userid: str, db: Session = Depends(get_db)):
     try:
-        return PermissionDB().get_permission(roleid, db)
+        return PermissionDB().user_permission(userid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update_permission", tags=["Permission"]) 
-def update_permission(roleid: int, permissions_data: dict, db: Session = Depends(get_db)):
-    try:
-        return PermissionDB().update_permissions(roleid, permissions_data, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/delete_permission", tags=["Permission"])
-def delete_permission(permissionid: int, db: Session = Depends(get_db)):
-    try:
-        return permission_db.delete_permission(permissionid, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    
+@app.get("/login", tags=["Permission"])
+def login(username: str, password: str, db: Session = Depends(get_db)):
+  try:
+      return PermissionDB().login(username, password, db)
+  except Exception as e:
+      raise HTTPException(status_code=500, detail=str(e))
+    
 # -------------------- Menu Service --------------------
-@app.post("/menu", tags=["Menu"])
-def get_menu():
+
+@app.get("/menus", tags=["Menu"])
+def get_menus():
     try:
         return menu_db.get_menu()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/add_menu", tags=["Menu"])
-def add_menu_api(menu: schemas.MenuCreate, db: Session = Depends(get_db)):
-    try:
-        return menu_db.add_menu(menu, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update_menu", tags=["Menu"])
-def update_menu_api(menuid: str, menu: schemas.MenuUpdate, db: Session = Depends(get_db)):
-    try:
-        return menu_db.update_menu(menuid, menu, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
   

@@ -152,7 +152,7 @@ class DetectionModelService:
             "modelid": modelid,
             "versionno": 1,
             "modelstatus": "Processing",
-            "currentstep": 1,
+            "currentstep": 0,
             "createdby": model.createdby,
             "createddate": now
         })
