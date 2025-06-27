@@ -1,14 +1,19 @@
 from database.connect_to_db import engine, Session, text, SQLAlchemyError
-from fastapi import UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form
+from pathlib import Path
+import shutil
 import database.schemas as schemas
 from datetime import datetime
 from fastapi.responses import JSONResponse
 import database.schemas as schemas
 from typing import Union, Dict, Any, List
 import os
-import shutil
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+import base64
+import json
+
+app = FastAPI()
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -16,7 +21,7 @@ def error_response(code: int, message: str):
 def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
-UPLOAD_FOLDER = "/home/ubuntu/api/dataset/" 
+UPLOAD_FOLDER = "dataset" 
 
 # Case
 # 1. ถ้า add new model, status = Processing
@@ -46,13 +51,13 @@ class DetectionModelDB:
             print(f"Database error: {e}")
             return []
 
-    def get_function(self):
-        return self._fetch_all("SELECT * FROM function")
-    
     def get_label_class(self):
         return self._fetch_all("SELECT * FROM labelclass")
     
-    def get_version(self, modelid: int):
+    def get_functions(self):
+        return self._fetch_all("SELECT * FROM function")
+    
+    def get_versions(self, modelid: int):
       result = self._fetch_all(
           "SELECT versionno FROM modelversion WHERE modelid = :modelid ORDER BY versionno DESC",
           {"modelid": modelid}
@@ -62,9 +67,33 @@ class DetectionModelDB:
       version_list.insert(0, next_version)
       return version_list
     
-    def get_model_function(self, modelversionid: int):
+    def get_model_functions(self, modelversionid: int):
         return self._fetch_all("SELECT * FROM modelfunction WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
     
+    def get_model_images(self, modelversionid: int):
+      rows = self._fetch_all(
+          "SELECT * FROM image WHERE modelversionid = :modelversionid",
+          {"modelversionid": modelversionid}
+      )
+
+      image_data = []
+      for row in rows:
+          relative_path = Path(row["imagepath"])
+          file_path = Path(UPLOAD_FOLDER) / relative_path
+
+          image_data.append({
+              "imageid": row["imageid"],
+              "imagename": row["imagename"],
+              "imagepath": f'dataset/{row["imagepath"]}',
+              "file": str(file_path.resolve()),
+              "annotate": row["annotate"],
+          })
+
+      return image_data
+
+    def get_model_camera(self, modelversionid: int):
+        return self._fetch_one("SELECT * FROM cameramodelprodapplied WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
+
     def get_model_version(self, modelversionid: int):
         return self._fetch_one("""
             SELECT mv.*, m.modelname, m.modeldescription, c.prodid, c.cameraid
@@ -74,12 +103,6 @@ class DetectionModelDB:
             WHERE mv.modelversionid = :modelversionid
         """, {"modelversionid": modelversionid})
     
-    def get_model_image(self, modelversionid: int):
-        return self._fetch_all("SELECT * FROM image WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
-
-    def get_model_camera(self, modelversionid: int):
-        return self._fetch_one("SELECT * FROM cameramodelprodapplied WHERE modelversionid = :modelversionid", {"modelversionid": modelversionid})
-
     def suggest_modelname(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT modelname FROM model
@@ -225,6 +248,12 @@ class DetectionModelService:
         db.execute(text("UPDATE model SET isdeleted = true WHERE modelid = :modelid"), {"modelid": modelid})
         db.commit()
         return success_response(200, {"message": "Model marked as deleted", "modelid": modelid, "isdeleted": True})
+    
+    @staticmethod
+    def delete_image(imageid: int, db: Session):
+        db.execute(text("DELETE FROM image WHERE imageid = :imageid"), {"imageid": imageid})
+        db.commit()
+        return success_response(200, {"message": "Imageid as deleted", "imageid": imageid, "isdeleted": True})
     
     @staticmethod
     def model_detail(modelversionid: int, db: Session):
@@ -552,56 +581,116 @@ class DetectionModelService:
       return success_response(200, {"modelversionid": modelversionid})
 
     @staticmethod
-    def save_image_file(file: UploadFile, folder: str) -> str:
-        folder_path = os.path.join(UPLOAD_FOLDER, folder)
-        os.makedirs(folder_path, exist_ok=True)
+    def upload_image_file(modelversionid: int, prodid: str, cameraid: str, modelid: str, updatedby: str, annotate, file: File, db: Session) -> str:
+        try:
+            image_data = []
+            folder = f"{prodid}/{cameraid}/{modelversionid}"
+            folder_path = Path(UPLOAD_FOLDER) / folder
+            folder_path.mkdir(parents=True, exist_ok=True)
 
-        file_path = os.path.join(folder_path, file.filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            file_path = folder_path / file.filename
+            # print(f"Saving to: {file_path.resolve()}")
 
-        return file_path
-    
+            # Save image to disk
+            with file_path.open("wb") as buffer:
+              shutil.copyfileobj(file.file, buffer)
+
+            imagepath = f"{folder}/{file.filename}"
+            fullpath = str(file_path.resolve())
+
+            # Check annotate
+            if annotate in ('', "", 'null', None, {}):
+                annotate_data = []
+            else:
+                annotate_data = annotate
+              
+            # Insert 'image'
+            result = db.execute(text("""
+                INSERT INTO image (
+                    modelversionid, imagename, imagepath, annotate
+                ) VALUES (
+                    :modelversionid, :imagename, :imagepath, :annotate
+                )
+                RETURNING imageid
+            """), {
+                "modelversionid": modelversionid,
+                "imagename": file.filename,
+                "imagepath": imagepath,
+                "annotate": json.dumps(annotate_data)
+            })
+
+            imageid = result.scalar()
+
+            image_data.append({
+                "imageid": imageid,
+                "imagename": file.filename,
+                "imagepath": f'dataset/{imagepath}',
+                "file": fullpath
+            })
+
+            db.commit()
+            return success_response(200, image_data)
+        except Exception as e:
+            print(f"Error saving file: {e}")
+            return ""
+
     @staticmethod
-    def annotate_image(model: schemas.DetectionModelImage, db: Session):
-        image_data = []
+    def upload_base64_image(model: schemas.DetectionModelImage, db: Session):
+        try:
+          image_data = []
+          folder = f"{model.prodid}/{model.cameraid}/{model.modelversionid}"
+          folder_path = Path(UPLOAD_FOLDER) / folder
+          folder_path.mkdir(parents=True, exist_ok=True)
 
-        folder = f"{model.prodid}/{model.cameraId}/{model.modelversionid}/{model.filename}"
+          file_path = folder_path / model.filename
+          # print(f"Saving to: {file_path.resolve()}")
 
-        # Save file
-        image_path = DetectionModelService.save_image_file(model.base64, folder)
+          # Save image to disk
+          image_bytes = base64.b64decode(model.base64)
+          with file_path.open("wb") as f:
+              f.write(image_bytes)
 
-        # Insert with RETURNING imageid
-        result = db.execute(text("""
-            INSERT INTO image (
-                modelversionid, imagename, imagepath, folder, annotate
-            ) VALUES (
-                :modelversionid, :imagename, :imagepath, :folder, :annotate
-            )
-            RETURNING imageid
-        """), {
-            "modelversionid": model.modelversionid,
-            "imagename": model.filename,
-            "imagepath": image_path,
-            "folder": folder,
-            "annotate": model.annotate
-        })
+          imagepath_str = str(file_path.resolve().as_posix())
+          file_path = Path(imagepath_str) 
+          # "file": str(file_path.resolve()),
 
-        imageid = result.scalar()
+          imagepath = f"{folder}/{model.filename}"
+          fullpath = str(file_path.resolve())
 
-        image_data.append({
-            "imageid": imageid,
-            "imagename": model.filename,
-            "imagepath": image_path,
-            "folder": folder,
-        })
+          # Check annotate
+          if model.annotate in ('', "", 'null', None, {}):
+              annotate_data = []
+          else:
+              annotate_data = model.annotate
+
+          # Insert 'image'
+          result = db.execute(text("""
+              INSERT INTO image (
+                  modelversionid, imagename, imagepath, annotate
+              ) VALUES (
+                  :modelversionid, :imagename, :imagepath, :annotate
+              )
+              RETURNING imageid
+          """), {
+              "modelversionid": model.modelversionid,
+              "imagename": model.filename,
+              "imagepath": imagepath,
+              "annotate": json.dumps(annotate_data)
+          })
+
+          imageid = result.scalar()
+
+          image_data.append({
+              "imageid": imageid,
+              "imagename": model.filename,
+              "imagepath": f'dataset/{imagepath}',
+              "file": fullpath
+          })
+
+          db.commit()
+          return success_response(200, image_data)
+        except Exception as e:
+            print(f"Error saving file: {e}")
+            return ""
     
-        db.commit()
-        return success_response(200, image_data)
-
-
-  
-      
-
-
 

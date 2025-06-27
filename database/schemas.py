@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
+from fastapi import UploadFile, Form, File, Body
 
 class RoleCreate(BaseModel):
     rolename: str = Field(alias="roleName")
@@ -167,12 +168,13 @@ class DetectionModelUpdateStep4(BaseModel):
 
 class DetectionModelImage(BaseModel):
     modelversionid: int = Field(alias="modelVersionId")
-    prodid: str = Field(alias="ProductId")
-    cameraid: Optional[int] = Field(default=None, alias="cameraId")
-    filename: Optional[str]
-    base64: Optional[str]
-    annotate: Optional[str]
-    updatedby: Optional[str] = Field(default=None, alias="updatedBy")
+    prodid: str = Field(alias="productId")
+    cameraid: str = Field(alias="cameraId")
+    modelid: int = Field(alias="modelId")
+    updatedby: str = Field(alias="updatedBy")
+    annotate: Optional[dict] = {}
+    filename: str
+    base64: str
 
 class TransactionCreate(BaseModel):
     runningno: int = Field(alias="runningNo")

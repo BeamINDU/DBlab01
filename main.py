@@ -21,8 +21,10 @@ from database.menu import MenuDB
 from database.dashboard import DashboardService
 # from database.live_inspection import live_inspection_ws_handler
 # from streaming.live_stream import setup_streaming, websocket_clients
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware 
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 app = FastAPI(
     title="PI Backend API",
@@ -60,6 +62,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/dataset", StaticFiles(directory="dataset"), name="dataset") 
+app.mount("/result", StaticFiles(directory="product_defect_result"), name="result")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -140,7 +146,6 @@ def suggest_username(q: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Role Service --------------------
-
 @app.get("/roles", tags=["Role"])
 def get_roles():
     """Get all roles"""
@@ -516,10 +521,10 @@ def suggest_function(q: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/function", tags=["Model"])
-def get_function():
+@app.get("/functions", tags=["Model"])
+def get_functions():
     try:
-        return DetectionModelDB().get_function()
+        return DetectionModelDB().get_functions()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -530,31 +535,24 @@ def get_label_class():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/version", tags=["Model"])
-def get_version(modelid : int):
+@app.get("/versions", tags=["Model"])
+def get_versions(modelid : int):
     try:
-        return DetectionModelDB().get_version(modelid)
+        return DetectionModelDB().get_versions(modelid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/model-function", tags=["Model"])
-def get_model_function(modelversionid : int):
+@app.get("/model-functions", tags=["Model"])
+def get_model_functions(modelversionid : int):
     try:
-        return DetectionModelDB().get_model_function(modelversionid )
+        return DetectionModelDB().get_model_functions(modelversionid )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/model-version", tags=["Model"])
-def get_model_version(modelversionid : int):
+  
+@app.get("/model-images", tags=["Model"])
+def get_model_images(modelversionid: int):
     try:
-        return DetectionModelDB().get_model_version(modelversionid )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/model-image", tags=["Model"])
-def get_model_version(modelversionid: int):
-    try:
-        return DetectionModelDB().get_model_image(modelversionid)
+        return DetectionModelDB().get_model_images(modelversionid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -564,7 +562,14 @@ def get_model_camera(modelversionid: int):
         return DetectionModelDB().get_model_camera(modelversionid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+@app.get("/model-version", tags=["Model"])
+def get_model_version(modelversionid : int):
+    try:
+        return DetectionModelDB().get_model_version(modelversionid )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+  
 @app.get("/model-detail", tags=["Model"])
 def model_detail(modelversionid: int, db: Session = Depends(get_db)):
     try:
@@ -590,6 +595,13 @@ def add_model(model: schemas.DetectionModelCreate, db: Session = Depends(get_db)
 def delete_model(modelid: str, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().delete_model(modelid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-image", tags=["Model"])
+def delete_image(imageid: str, db: Session = Depends(get_db)):
+    try:
+        return DetectionModelService().delete_image(imageid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -620,30 +632,29 @@ def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateS
         return DetectionModelService().update_model_step4(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
-    
 
-@app.put("/annotate-image", tags=["Model"])
-def annotate_image(modelversionid: str, model: schemas.DetectionModelImage, db: Session = Depends(get_db)):
+@app.post("/upload-base64-image", tags=["Model"])
+def upload_base64_image(model: schemas.DetectionModelImage, db: Session = Depends(get_db)):
     try:
-        return DetectionModelService().annotate_image(modelversionid, model, db)
+        return DetectionModelService().upload_base64_image(model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
-       
-# @app.post("/upload-annotate-image", tags=["Model"])
-# def update_model_step2(
-#     modelversionid: int = Form(...),
-#     prodid: int = Form(...),
-#     cameraid: int = Form(...),
-#     filename: str = Form(...),
-#     annotate: str = Form(...),
-#     updatedby: str = Form(...),
-#     file: UploadFile = File(...)
-#     db: Session = Depends(get_db)
-# ):
-#   try:
-#     return DetectionModelService().update_model_step2(modelversionid, prodid, cameraid, filename, annotate, updatedby, file, db)
-#   except Exception as e:
-#       raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/upload-image-file", tags=["Model"])
+def upload_image_file(
+    modelversionid: int = Form(...),
+    prodid: str = Form(...),
+    cameraid: str = Form(...),
+    modelid: int = Form(...),
+    updatedby: str = Form(...),
+    annotate: Optional[str] = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+) -> str:
+    try:
+        return DetectionModelService().upload_image_file(modelversionid, prodid, cameraid, modelid, updatedby, annotate, file, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
     
 # -------------------- Transaction Service --------------------
 @app.get("/transaction", tags=["Transaction"])
@@ -851,8 +862,30 @@ def get_cameras_dropdown_list(db: Session = Depends(get_db)):
         return DashboardService.get_cameras_list(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
 
+# -------------------- serve image --------------------
+    
+# @app.get("/files/{full_path:path}")
+# async def serve_image(full_path: str):
+#     file_path = (Path(UPLOAD_FOLDER) / full_path).resolve()
+#     base_path = Path(UPLOAD_FOLDER).resolve()
 
+#     if base_path in file_path.parents and file_path.is_file():
+#         return FileResponse(file_path)
+#     else:
+#         raise HTTPException(status_code=404, detail="File not found")
+    
+# @app.get("/{full_path:path}")
+# async def serve_image(full_path: str):
+#     file_path = (Path(UPLOAD_FOLDER) / full_path).resolve()
+#     base_path = Path(UPLOAD_FOLDER).resolve()
+
+#     if base_path in file_path.parents and file_path.is_file():
+#         return FileResponse(file_path)
+#     else:
+#         raise HTTPException(status_code=404, detail="File not found")
+    
 # -------------------- Run Server --------------------
 # if __name__ == "__main__":
 #     import uvicorn
