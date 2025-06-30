@@ -146,47 +146,40 @@ def suggest_username(q: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Role Service --------------------
+
 @app.get("/roles", tags=["Role"])
-def get_roles():
+def roles():
     """Get all roles"""
     try:
         return {"roles": role_db.get_roles()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/roles/{role_id}", tags=["Role"])
-def get_role(role_id: int):
-    """Get single role by ID"""
-    try:
-        return role_db.get_role(role_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/roles", tags=["Role"])
-def create_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
+@app.post("/add-role", tags=["Role"])
+def add_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
     """Create new role"""
     try:
         return role_db.add_role(role, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/roles/{role_id}", tags=["Role"])
-def update_role(role_id: int, role: schemas.RoleUpdate, db: Session = Depends(get_db)):
-    """Update role by ID"""
+@app.put("/update-role", tags=["Role"])
+def update_role(roleid: str, role: schemas.RoleUpdate, db: Session = Depends(get_db)):
+    """Update role"""
     try:
-        return role_db.update_role(str(role_id), role, db)
+        return role_db.update_role(roleid, role, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/roles/{role_id}", tags=["Role"])
-def delete_role(role_id: int, db: Session = Depends(get_db)):
-    """Delete role by ID"""
+@app.delete("/delete-role", tags=["Role"])
+def delete_role_api(roleid: str, db: Session = Depends(get_db)):
+    """Delete role"""
     try:
-        return role_db.delete_role(str(role_id), db)
+        return role_db.delete_role(roleid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/roles/upload", tags=["Role"])
+@app.post("/upload-roles", tags=["Role"])
 async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload roles from file"""
     try:
@@ -194,44 +187,28 @@ async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/roles/suggestions", tags=["Role"])
-def get_role_suggestions(q: str):
+@app.get("/suggest-role-name", tags=["Role"])
+def suggest_role_name(q: str):
     """Get role name suggestions"""
     try:
         return role_db.suggest_role_name(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/roles/{role_id}/permissions", tags=["Role"])
-def get_role_permissions(role_id: int, db: Session = Depends(get_db)):
+@app.put("/role-permissions", tags=["Role"])
+def get_role_permissions(roleid: int, db: Session = Depends(get_db)):
+    """Get permissions for a role"""
     try:
-        return role_db.get_role_permissions(role_id, db)
+        return role_db.get_role_permissions(roleid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/roles/{role_id}/permissions", tags=["Role"])
-def update_role_permissions(role_id: int, permissions_data: dict, db: Session = Depends(get_db)):
-
-    try:
-        return role_db.update_role_permissions(role_id, permissions_data, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update-role-permissions", tags=["Role"]) 
+@app.put("/update-role-permissions", tags=["Role"])
 def update_role_permissions(roleid: int, permissions_data: dict, db: Session = Depends(get_db)):
+    """Update permissions for a role"""
     try:
-        print(f"Received update-role-permissions request for roleId: {roleid}")
-        print(f"Request data: {permissions_data}")
-        
-        result = role_db.update_role_permissions(roleid, permissions_data, db)
-        
-        print(f"Role permissions update successful for roleId: {roleid}")
-        return result
-        
-    except HTTPException:
-        raise
+        return role_db.update_role_permissions(roleid, permissions_data, db)
     except Exception as e:
-        print(f"Error in update-role-permissions endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
     
