@@ -610,26 +610,25 @@ def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateS
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
 
-@app.post("/upload-base64-image", tags=["Model"])
-def upload_base64_image(model: schemas.DetectionModelImage, db: Session = Depends(get_db)):
-    try:
-        return DetectionModelService().upload_base64_image(model, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))   
+# @app.post("/upload-base64-image", tags=["Model"])
+# def upload_base64_image(model: schemas.DetectionModelImage, db: Session = Depends(get_db)):
+#     try:
+#         return DetectionModelService().upload_base64_image(model, db)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))   
     
 @app.post("/upload-image-file", tags=["Model"])
 def upload_image_file(
     modelversionid: int = Form(...),
-    prodid: str = Form(...),
-    cameraid: str = Form(...),
-    modelid: int = Form(...),
+    modelid: str = Form(...),
     updatedby: str = Form(...),
-    annotate: Optional[str] = Form(""),
-    file: UploadFile = File(...),
+    annotate: str = Form(...),
+    imageid: Optional[int] = Form(None),
+    file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ) -> str:
     try:
-        return DetectionModelService().upload_image_file(modelversionid, prodid, cameraid, modelid, updatedby, annotate, file, db)
+        return DetectionModelService().upload_image_file(modelversionid, modelid, updatedby, annotate, imageid, file, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
     

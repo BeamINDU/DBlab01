@@ -167,10 +167,11 @@ class DetectionModelUpdateStep4(BaseModel):
     updatedby: Optional[str] = Field(default=None, alias="updatedBy")
 
 class DetectionModelImage(BaseModel):
+    imageid: Optional[int] = Field(alias="imageId")
     modelversionid: int = Field(alias="modelVersionId")
-    prodid: str = Field(alias="productId")
-    cameraid: str = Field(alias="cameraId")
     modelid: int = Field(alias="modelId")
+    # prodid: str = Field(alias="productId")
+    # cameraid: str = Field(alias="cameraId")
     updatedby: str = Field(alias="updatedBy")
     annotate: Optional[dict] = {}
     filename: str

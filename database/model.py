@@ -6,7 +6,7 @@ import database.schemas as schemas
 from datetime import datetime
 from fastapi.responses import JSONResponse
 import database.schemas as schemas
-from typing import Union, Dict, Any, List
+from typing import Optional, Union, Dict, Any, List
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -96,16 +96,15 @@ class DetectionModelDB:
 
     def get_model_version(self, modelversionid: int):
         return self._fetch_one("""
-            SELECT mv.*, m.modelname, m.modeldescription, c.prodid, c.cameraid
+            SELECT mv.*, c.prodid, c.cameraid
             FROM modelversion mv
-            LEFT JOIN model m ON mv.modelid = m.modelid
             LEFT JOIN cameramodelprodapplied c on c.modelversionid  =  mv.modelversionid
             WHERE mv.modelversionid = :modelversionid
         """, {"modelversionid": modelversionid})
     
     def suggest_modelname(self, q: str):
         rows = self._fetch_all("""
-            SELECT DISTINCT modelname FROM model
+            SELECT DISTINCT modelname FROM modelversion
             WHERE isdeleted = false AND LOWER(modelname) LIKE LOWER(:keyword)
             ORDER BY modelname ASC
             LIMIT 10; """,
@@ -260,9 +259,9 @@ class DetectionModelService:
         sql = text("""
           SELECT 
             m.modelid,
-            m.modelname,
+            mv.modelname,
             cmp.prodid,
-            m.modeldescription,
+            mv.modeldescription,
             ARRAY_AGG(DISTINCT f.functionid) AS functions,
             mv.modelversionid,
             mv.versionno,
@@ -273,20 +272,13 @@ class DetectionModelService:
             mv.valpercent,
             mv.epochs
           FROM model m
-          
-          JOIN (
-              SELECT *
-              FROM modelversion
-              WHERE modelid = :modelid
-              ORDER BY versionno DESC
-              LIMIT 1
-          ) mv ON m.modelid = mv.modelid
+          JOIN modelversion mv ON m.modelid = mv.modelid
           LEFT JOIN modelfunction mf ON mv.modelversionid = mf.modelversionid
           LEFT JOIN function f ON mf.functionid = f.functionid
           LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
-          WHERE m.modelversionid = :modelversionid
+          WHERE mv.modelversionid = :modelversionid
           GROUP BY 
-              m.modelid, m.modelname, m.modeldescription,
+              m.modelid, mv.modelname, mv.modeldescription,
               mv.modelversionid, mv.versionno, mv.modelstatus, 
               mv.currentstep, cmp.prodid, mv.trainpercent, 
               mv.testpercent, mv.valpercent, mv.epochs
@@ -309,8 +301,8 @@ class DetectionModelService:
 			        mv.modelversionid,
               mv.modelid,
               cmp.prodid,
-              m.modelname,
-              m.modeldescription,
+              mv.modelname,
+              mv.modeldescription,
               STRING_AGG(DISTINCT f.functionname, ', ') AS functionname,
               mv.versionno,
               mv.modelstatus,
@@ -325,7 +317,7 @@ class DetectionModelService:
           LEFT JOIN function f ON mf.functionid = f.functionid
           LEFT JOIN cameramodelprodapplied cmp ON cmp.modelversionid = mv.modelversionid
           GROUP BY 
-              mv.modelversionid, m.modelid, cmp.prodid, m.modelname, m.modeldescription,
+              mv.modelversionid, m.modelid, cmp.prodid, mv.modelname, mv.modeldescription,
               mv.versionno, mv.modelstatus, mv.currentstep, mv.createdby, mv.createddate,
               mv.updatedby, mv.updateddate
       """)
@@ -468,25 +460,27 @@ class DetectionModelService:
       })
 
       # Update 'model'
-      db.execute(text("""
-          UPDATE model
-          SET modelname = :modelname,
-              modeldescription = :modeldescription,
-              updatedby = :updatedby,
-              updateddate = :updateddate
-          WHERE modelid = :modelid
-      """), {
-          "modelname": model.modelname,
-          "modeldescription": model.modeldescription,
-          "updatedby": model.updatedby,
-          "updateddate": now,
-          "modelid": model.modelid
-      })
+      # db.execute(text("""
+      #     UPDATE model
+      #     SET modelname = :modelname,
+      #         modeldescription = :modeldescription,
+      #         updatedby = :updatedby,
+      #         updateddate = :updateddate
+      #     WHERE modelid = :modelid
+      # """), {
+      #     "modelname": model.modelname,
+      #     "modeldescription": model.modeldescription,
+      #     "updatedby": model.updatedby,
+      #     "updateddate": now,
+      #     "modelid": model.modelid
+      # })
 
       # Update 'modelversion'
       db.execute(text("""
           UPDATE modelversion
-          SET trainpercent = :trainpercent,
+          SET modelname = :modelname,
+              modeldescription = :modeldescription,
+              trainpercent = :trainpercent,
               testpercent = :testpercent,
               valpercent = :valpercent,
               epochs = :epochs,
@@ -495,6 +489,8 @@ class DetectionModelService:
               updateddate = :updateddate
           WHERE modelversionid = :modelversionid
       """), {
+          "modelname": model.modelname,
+          "modeldescription": model.modeldescription,
           "trainpercent": model.trainpercent,
           "testpercent": model.testpercent,
           "valpercent": model.valpercent,
@@ -581,116 +577,140 @@ class DetectionModelService:
       return success_response(200, {"modelversionid": modelversionid})
 
     @staticmethod
-    def upload_image_file(modelversionid: int, prodid: str, cameraid: str, modelid: str, updatedby: str, annotate, file: File, db: Session) -> str:
+    def upload_image_file(
+        modelversionid: int,
+        modelid: str,
+        updatedby: str,
+        annotate,
+        imageid: Optional[int],
+        file: Optional[File],
+        db: Session
+    ) -> str:
         try:
-            image_data = []
-            folder = f"{prodid}/{cameraid}/{modelversionid}"
-            folder_path = Path(UPLOAD_FOLDER) / folder
-            folder_path.mkdir(parents=True, exist_ok=True)
+            image_data = {}
 
-            file_path = folder_path / file.filename
-            # print(f"Saving to: {file_path.resolve()}")
-
-            # Save image to disk
-            with file_path.open("wb") as buffer:
-              shutil.copyfileobj(file.file, buffer)
-
-            imagepath = f"{folder}/{file.filename}"
-            fullpath = str(file_path.resolve())
-
-            # Check annotate
-            if annotate in ('', "", 'null', None, {}):
+            # Parse annotation safely
+            if annotate in ('', "null", None, {}):
                 annotate_data = []
             else:
                 annotate_data = annotate
-              
-            # Insert 'image'
-            result = db.execute(text("""
-                INSERT INTO image (
-                    modelversionid, imagename, imagepath, annotate
-                ) VALUES (
-                    :modelversionid, :imagename, :imagepath, :annotate
-                )
-                RETURNING imageid
-            """), {
-                "modelversionid": modelversionid,
-                "imagename": file.filename,
-                "imagepath": imagepath,
-                "annotate": json.dumps(annotate_data)
-            })
 
-            imageid = result.scalar()
+            if imageid is None and file is not None:
+                # Insert new image
+                folder = f"{modelid}/{modelversionid}"
+                folder_path = Path(UPLOAD_FOLDER) / folder
+                folder_path.mkdir(parents=True, exist_ok=True)
 
-            image_data.append({
-                "imageid": imageid,
-                "imagename": file.filename,
-                "imagepath": f'dataset/{imagepath}',
-                "file": fullpath
-            })
+                file_path = folder_path / file.filename
+
+                with file_path.open("wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+
+                imagepath = f"{folder}/{file.filename}"
+                fullpath = str(file_path.resolve())
+
+                print(f'{annotate_data}')
+
+                result = db.execute(text("""
+                    INSERT INTO image (
+                        modelversionid, imagename, imagepath, annotate
+                    ) VALUES (
+                        :modelversionid, :imagename, :imagepath, :annotate
+                    )
+                    RETURNING imageid
+                """), {
+                    "modelversionid": modelversionid,
+                    "imagename": file.filename,
+                    "imagepath": imagepath,
+                    "annotate": annotate_data
+                })
+                imageid = result.scalar()
+
+                image_data = {
+                    "imageid": imageid,
+                    "imagename": file.filename,
+                    "imagepath": f'dataset/{imagepath}',
+                    "file": fullpath
+                }
+
+            elif imageid is not None:
+                print(f'{annotate_data}')
+                
+                # Update only annotation
+                db.execute(text("""
+                    UPDATE image
+                    SET annotate = :annotate
+                    WHERE imageid = :imageid
+                """), {
+                    "imageid": imageid,
+                    "annotate": annotate_data
+                })
+
+                # Select imagename and imagepath for response
+                image_row = db.execute(text("""
+                    SELECT imagename, imagepath
+                    FROM image
+                    WHERE imageid = :imageid
+                """), {"imageid": imageid}).fetchone()
+
+                if image_row:
+                    imagename, imagepath = image_row
+                    fullpath = str((Path(UPLOAD_FOLDER) / imagepath).resolve())
+
+                    image_data = {
+                        "imageid": imageid,
+                        "imagename": imagename,
+                        "imagepath": f'dataset/{imagepath}',
+                        "file": fullpath
+                    }
+                else:
+                    raise ValueError(f"No image found with imageid={imageid}")
+
+            else:
+                raise ValueError("File must be provided when inserting new image.")
 
             db.commit()
             return success_response(200, image_data)
+
         except Exception as e:
             print(f"Error saving file: {e}")
-            return ""
+            db.rollback()
+            raise e
+
 
     @staticmethod
     def upload_base64_image(model: schemas.DetectionModelImage, db: Session):
         try:
-          image_data = []
-          folder = f"{model.prodid}/{model.cameraid}/{model.modelversionid}"
-          folder_path = Path(UPLOAD_FOLDER) / folder
-          folder_path.mkdir(parents=True, exist_ok=True)
+            image_data = []
+            folder = f"{model.modelid}/{model.modelversionid}"
+            folder_path = Path(UPLOAD_FOLDER) / folder
+            folder_path.mkdir(parents=True, exist_ok=True)
 
-          file_path = folder_path / model.filename
-          # print(f"Saving to: {file_path.resolve()}")
+            file_path = folder_path / model.filename
+            # print(f"Saving to: {file_path.resolve()}")
 
-          # Save image to disk
-          image_bytes = base64.b64decode(model.base64)
-          with file_path.open("wb") as f:
-              f.write(image_bytes)
+            # Save image to disk
+            image_bytes = base64.b64decode(model.base64)
+            with file_path.open("wb") as f:
+                f.write(image_bytes)
 
-          imagepath_str = str(file_path.resolve().as_posix())
-          file_path = Path(imagepath_str) 
-          # "file": str(file_path.resolve()),
+            imagepath_str = str(file_path.resolve().as_posix())
+            file_path = Path(imagepath_str) 
+            # "file": str(file_path.resolve()),
 
-          imagepath = f"{folder}/{model.filename}"
-          fullpath = str(file_path.resolve())
+            imagepath = f"{folder}/{model.filename}"
+            fullpath = str(file_path.resolve())
 
-          # Check annotate
-          if model.annotate in ('', "", 'null', None, {}):
-              annotate_data = []
-          else:
-              annotate_data = model.annotate
+            image_data.append({
+                "imagename": model.filename,
+                "imagepath": f'dataset/{imagepath}',
+                "file": fullpath
+            })
 
-          # Insert 'image'
-          result = db.execute(text("""
-              INSERT INTO image (
-                  modelversionid, imagename, imagepath, annotate
-              ) VALUES (
-                  :modelversionid, :imagename, :imagepath, :annotate
-              )
-              RETURNING imageid
-          """), {
-              "modelversionid": model.modelversionid,
-              "imagename": model.filename,
-              "imagepath": imagepath,
-              "annotate": json.dumps(annotate_data)
-          })
-
-          imageid = result.scalar()
-
-          image_data.append({
-              "imageid": imageid,
-              "imagename": model.filename,
-              "imagepath": f'dataset/{imagepath}',
-              "file": fullpath
-          })
-
-          db.commit()
-          return success_response(200, image_data)
+            return success_response(200, image_data)
         except Exception as e:
             print(f"Error saving file: {e}")
-            return ""
+            db.rollback()
+            raise e  # Or return error response if you prefer
     
 
