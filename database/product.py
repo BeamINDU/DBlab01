@@ -1,5 +1,5 @@
 from database.connect_to_db import engine, Session, text, SQLAlchemyError
-from datetime import datetime
+from datetime import datetime, date
 from fastapi.responses import JSONResponse
 import database.schemas as schemas
 from typing import Union, Dict, Any
@@ -25,16 +25,80 @@ class ProductDB:
             print(f"Database error: {e}")
             return []
 
-    def get_products(self):
-        return self._fetch_all("SELECT * FROM product WHERE isdeleted = false")
+    def get_products(self, model: schemas.ProductSearch):
+        filters = []
+        params = {}
+        
+        if model.prodid:
+            filters.append("p.prodid ILIKE :prodid")
+            params["prodid"] = f"%{model.prodid}%"
+
+        if model.prodname:
+            filters.append("p.prodname ILIKE :prodname")
+            params["prodname"] = f"%{model.prodname}%"
+
+        if model.prodserial:
+            filters.append("p.prodserial ILIKE :prodserial")
+            params["prodserial"] = f"%{model.prodserial}%"
+
+        if model.prodtypeid:
+            filters.append("p.prodtypeid ILIKE :prodtypeid")
+            params["prodtypeid"] = f"%{model.prodtypeid}%"
+
+        if model.prodtype:
+            filters.append("pt.prodtype ILIKE :prodtype")
+            params["prodtype"] = f"%{model.prodtype}%"
+
+        if model.prodstatus is not None:
+            filters.append("p.prodstatus = :prodstatus")
+            params["prodstatus"] = model.prodstatus
+
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
+
+        query = f"""
+            SELECT p.*, pt.prodtype FROM product p
+            LEFT JOIN prodtype pt ON p.prodtypeid = pt.prodtypeid 
+            WHERE p.isdeleted = false {where_clause}
+            ORDER BY p.prodname
+        """
+
+        # print("SQL Query:", query)
+        # print("Parameters:", params)
+
+        return self._fetch_all(query, params)
     
-    def get_product_types(self):
-        return self._fetch_all("SELECT * FROM prodtype WHERE isdeleted = false")
+    def get_product_types(self, model: schemas.ProdTypeSearch):
+        filters = []
+        params = {}
+        
+        if model.prodtypeid:
+            filters.append("prodtypeid ILIKE :prodtypeid")
+            params["prodtypeid"] = f"%{model.prodtypeid}%"
+
+        if model.prodtype:
+            filters.append("prodtype ILIKE :prodtype")
+            params["prodtype"] = f"%{model.prodtype}%"
+
+        if model.prodstatus is not None:
+            filters.append("prodstatus = :prodstatus")
+            params["prodstatus"] = model.prodstatus
+
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
+
+        query = f"""
+            SELECT * FROM prodtype
+            WHERE isdeleted = false {where_clause}
+            ORDER BY prodtype
+        """
+
+        return self._fetch_all(query, params)
 
     def suggest_product_id(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodid FROM product
-            WHERE isdeleted = false AND prodstatus = true AND LOWER(prodid) LIKE LOWER(:keyword)
+            WHERE isdeleted = false 
+              AND prodstatus = true
+              AND LOWER(prodid) LIKE LOWER(:keyword)
             ORDER BY prodid ASC
             LIMIT 10; """,
             {"keyword": q + "%"}
@@ -44,7 +108,9 @@ class ProductDB:
     def suggest_product_name(self, q: str):
       rows = self._fetch_all("""
           SELECT DISTINCT prodname FROM product
-          WHERE isdeleted = false AND prodstatus = true AND LOWER(prodname) LIKE LOWER(:keyword)
+          WHERE isdeleted = false 
+            AND prodstatus = true
+            AND LOWER(prodname) LIKE LOWER(:keyword)
           ORDER BY prodname ASC
           LIMIT 10; """,
           {"keyword": q + "%"}
@@ -54,7 +120,9 @@ class ProductDB:
     def suggest_serial_no(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodserial FROM product
-            WHERE isdeleted = false AND prodstatus = true AND LOWER(prodserial) LIKE LOWER(:keyword)
+            WHERE isdeleted = false 
+              AND prodstatus = true
+              AND LOWER(prodserial) LIKE LOWER(:keyword)
             ORDER BY prodserial ASC
             LIMIT 10; """,
             {"keyword": q + "%"}
@@ -64,7 +132,9 @@ class ProductDB:
     def suggest_producttype_id(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodtypeid FROM prodtype
-            WHERE isdeleted = false AND prodstatus = true AND LOWER(prodtypeid) LIKE LOWER(:keyword)
+            WHERE isdeleted = false 
+              AND prodstatus = true
+              AND LOWER(prodtypeid) LIKE LOWER(:keyword)
             ORDER BY prodtypeid ASC
             LIMIT 10; """,
             {"keyword": q + "%"}
@@ -74,7 +144,9 @@ class ProductDB:
     def suggest_producttype_name(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodtype FROM prodtype
-            WHERE isdeleted = false AND prodstatus = true AND LOWER(prodtype) LIKE LOWER(:keyword)
+            WHERE isdeleted = false 
+              AND prodstatus = true
+              AND LOWER(prodtype) LIKE LOWER(:keyword)
             ORDER BY prodtype ASC
             LIMIT 10; """,
             {"keyword": q + "%"}
@@ -109,6 +181,8 @@ class ProductService:
                     prodtypeid = :prodtypeid,
                     prodserial = :prodserial,
                     prodstatus = :prodstatus,
+                    barcode = :barcode,
+                    packsize = :packsize,
                     createdby = :createdby,
                     createddate = :createddate,
                     isdeleted = false
@@ -120,6 +194,8 @@ class ProductService:
                 "prodtypeid": product.prodtypeid,
                 "prodserial": product.prodserial,
                 "prodstatus": bool(product.prodstatus),
+                "barcode" : product.barcode,
+                "packsize" : product.packsize,
                 "createdby": product.createdby,
                 "createddate": now,
                 "updatedby": None  ,
@@ -129,11 +205,11 @@ class ProductService:
             # Insert new record
             insert_sql = text("""
                 INSERT INTO product (
-                    prodid, prodname, prodtypeid, prodserial, 
-                    prodstatus, createdby, createddate, isdeleted
+                    prodid, prodname, prodtypeid, prodserial, prodstatus,
+                    barcode, packsize, createdby, createddate, isdeleted
                 ) VALUES (
-                    :prodid, :prodname, :prodtypeid, :prodserial,
-                    :prodstatus, :createdby, :createddate, false
+                    :prodid, :prodname, :prodtypeid, :prodserial, :prodstatus,
+                    :barcode, :packsize, :createdby, :createddate, false
                 )
             """)
             db.execute(insert_sql, {
@@ -142,6 +218,8 @@ class ProductService:
                 "prodtypeid": product.prodtypeid,
                 "prodserial": product.prodserial,
                 "prodstatus": bool(product.prodstatus),
+                "barcode" : product.barcode,
+                "packsize": product.packsize,
                 "createdby": product.createdby,
                 "createddate": now
             })
@@ -160,6 +238,8 @@ class ProductService:
       update_fields["prodid"] = product.prodid
       update_fields["updateddate"] = now
       update_fields["update_prodid"] = prodid
+
+      print("now", now)
 
       # Check updatedby (user id)
       if not db.execute(text("SELECT 1 FROM \"user\" WHERE userid = :userid"),
@@ -194,6 +274,8 @@ class ProductService:
       if product.prodname is not None: update_fields["prodname"] = product.prodname
       if product.prodserial is not None: update_fields["prodserial"] = product.prodserial
       if product.prodstatus is not None: update_fields["prodstatus"] = product.prodstatus
+      if product.barcode is not None: update_fields["barcode"] = product.barcode
+      if product.packsize is not None: update_fields["packsize"] = product.packsize
       update_fields["isdeleted"] = False
 
       if not update_fields:
@@ -394,49 +476,167 @@ class ProductTypeService:
     @staticmethod
     async def upload_product_types(uploadby: str, file: UploadFile, db: Session):
         try:
-            now = datetime.now()
-
-            # ตรวจสอบประเภทไฟล์
             filename = file.filename.lower()
+
             file.file.seek(0)
+
             if filename.endswith(".xlsx") or filename.endswith(".xls"):
+
                 df = pd.read_excel(file.file, engine="openpyxl")
+
             elif filename.endswith(".csv"):
+
                 df = pd.read_csv(file.file)
+
             else:
-                raise error_response(400, "File must be .xlsx or .csv")
 
-            # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
-            product_types_data = []
-            for _, row in df.iterrows():
-                product_types_data.append({
-                    "prodtypeid": row.get("Product Type ID"),
-                    "prodtype": row.get("Product Type"),
-                    "proddescription": row.get("Description"),
-                    "prodstatus": row.get("Status", "Active"),
-                    # "createdby": row.get("Created By", "system"),
-                    # "createddate": pd.to_datetime(row.get("Created Date")) if pd.notnull(row.get("Created Date")) else None,
-                    # "updatedby": row.get("Updated By", "system"),
-                    # "updateddate": pd.to_datetime(row.get("Updated Date")) if pd.notnull(row.get("Updated Date")) else None,
-                })
+                raise error_response(400, detail="File must be .xlsx or .csv")
 
-            # SQL สำหรับ insert
-            insert_sql = """
-                INSERT INTO prodtype (
-                    prodtypeid, prodtype, proddescription, prodstatus, createdby, createddate
-                )
-                VALUES (
-                    :prodtypeid, :prodtype, :proddescription, :prodstatus, :createdby, :createddate
-                )
-            """
 
-            # ทำ bulk insert
-            db.execute(text(insert_sql), product_types_data)
-            db.commit()
-            return success_response(200,{"message": f"{len(product_types_data)} records uploaded successfully!"})
+
+            if df.empty:
+
+                raise error_response(400, detail="File is empty")
+
+            schema_query = text("""
+
+                SELECT column_name, udt_name
+
+                FROM information_schema.columns
+
+                WHERE table_name = 'prodtype' AND table_schema = 'public'
+
+            """)
+
+            schema_result = db.execute(schema_query).mappings().fetchall()
+
+            column_types = {row['column_name']: row['udt_name'] for row in schema_result}
+
+            postgres_to_python = {
+
+                'int4': int,
+
+                'varchar': str,
+
+                'text': str,
+
+                'bool': bool,
+
+                'date': date,
+
+                'timestamp': datetime
+
+            }
+
+            all_data = df.to_dict(orient="records")
+
+            for i, row in enumerate(all_data, start=1):
+
+                print(f"ROW {i}: {row}")
+
+                prodId = row.get('Product Type ID')
+
+                prodType = row.get('Product Type')
+
+                description = row.get('Description')
+
+                status = True if row.get('Status') == "Active" else False
+
+                status = str(status).strip().lower() in ["active", "true", "1"]
+
+                insert_data = {
+
+                    "prodtypeid": prodId,
+
+                    "prodtype": prodType,
+
+                    "proddescription": description,
+
+                    "prodstatus": status
+
+                }
+
+                for field, value in insert_data.items():
+
+                    expected_udt = column_types.get(field)
+
+                    expected_type = postgres_to_python.get(expected_udt)
+
+                    if expected_type:
+
+                        try:
+
+                            if expected_type == bool:
+
+                                if isinstance(value, str):
+
+                                    value = value.strip().lower() in ["true", "active", "1"]
+
+                                else:
+
+                                    value = bool(value)
+
+                            else:
+
+                                value = expected_type(value)
+
+                            insert_data[field] = value
+
+                        except (ValueError, TypeError):
+
+                            raise error_response(
+
+                                400,
+
+                                detail=f"Row {i}: Field '{field}' must be of type {expected_type.__name__}, "
+
+                                    f"got '{value}' ({type(value).__name__})"
+
+                            )
+
+                sql_check = text("SELECT 1 FROM prodtype WHERE  prodtypeid = :prodtypeid")
+
+                if not db.execute(sql_check, {"prodtypeid": insert_data["prodtypeid"]}).first():
+
+                    sql_insert = text("""
+
+                   INSERT INTO prodtype ( prodtypeid , prodtype, proddescription, prodstatus)
+
+                        VALUES ( :prodtypeid, :prodtype, :proddescription, :prodstatus)
+
+                """)
+
+                    db.execute(sql_insert, insert_data)
+
+                else:
+
+                    sql_update = text("""
+
+                   UPDATE prodtype SET
+
+                            prodtype = :prodtype,
+
+                            proddescription = :proddescription,
+
+                            prodstatus = :prodstatus
+
+                        WHERE prodtypeid = :prodtypeid
+
+                """)
+
+                db.execute(sql_update, insert_data)
+
+                db.commit()
+
+            return success_response(200, {"message": "Products uploaded successfully"})
+
+
 
         except Exception as e:
-            print(f"Error uploading product types: {e}")
-            db.rollback()
-            raise error_response(500, "Failed to upload product types")
+
+            import traceback
+
+            traceback.print_exc()
+
+            raise error_response(500, detail=str(e))
  

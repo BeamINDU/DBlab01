@@ -49,13 +49,14 @@ class DashboardService:
                 prodlot,
                 SUM(totalok) AS total_ok,
                 SUM(totalng) AS total_ng
-            FROM public.defectsummary
+            FROM defectsummary
             GROUP BY prodid, prodlot
         ) ds
         INNER JOIN (
-            SELECT DISTINCT prodid, prodname, cameraid
-            FROM public.productdefectresult
-            WHERE defecttime BETWEEN :start AND :end
+            SELECT DISTINCT pd.prodid, p.prodname, pd.cameraid
+            FROM productdefectresult pd
+            LEFT JOIN product p on p.prodid = pd.prodid
+            WHERE pd.defecttime BETWEEN :start AND :end
         ) p ON ds.prodid = p.prodid
         """
         return db.execute(text(sql), {
@@ -69,20 +70,22 @@ class DashboardService:
     @staticmethod
     def ng_distribution(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
         sql = """
-        SELECT 
-            pdr.defecttype,
-            pdr.prodname,
-            ds.prodlot as line,
-            DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
-            COUNT(*) AS defect_count
-        FROM public.productdefectresult pdr
-        LEFT JOIN public.defectsummary ds ON pdr.prodid = ds.prodid
-        WHERE pdr.defecttime BETWEEN :start AND :end
-          AND (:productname IS NULL OR pdr.prodname = :productname)
-          AND (:prodline IS NULL OR ds.prodlot = :prodline)
-          AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
-        GROUP BY pdr.defecttype, hour_slot, pdr.prodname, ds.prodlot
-        ORDER BY hour_slot, pdr.defecttype;
+            SELECT 
+                d.defecttype,
+                p.prodname,
+                ds.prodlot as line,
+                DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
+                COUNT(*) AS defect_count
+            FROM productdefectresult pdr
+              LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid
+              LEFT JOIN product p ON p.prodid = pdr.prodid 
+              LEFT JOIN defecttype d on d.defectid = pdr.defectid
+            WHERE pdr.defecttime BETWEEN :start AND :end
+              AND (:productname IS NULL OR p.prodname = :productname)
+              AND (:prodline IS NULL OR ds.prodlot = :prodline)
+              AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
+            GROUP BY d.defecttype, hour_slot, p.prodname, ds.prodlot
+            ORDER BY hour_slot, d.defecttype;
         """
         return db.execute(text(sql), {
             "start": start,
@@ -96,19 +99,21 @@ class DashboardService:
     def top_5_defects(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
         sql = """
         SELECT
-            pdr.defecttype,
+            d.defecttype,
             ds.prodlot AS line,
             COUNT(*) AS quantity,
             ARRAY_AGG(pdr.defecttime ORDER BY pdr.defecttime) AS all_defect_times
-        FROM public.productdefectresult pdr
-        LEFT JOIN public.defectsummary ds ON pdr.prodid = ds.prodid 
-        WHERE pdr.defecttime BETWEEN :start AND :end
-          AND (:productname IS NULL OR pdr.prodname = :productname)
-          AND (:prodlot IS NULL OR ds.prodlot = :prodlot)
-          AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
-        GROUP BY pdr.defecttype, ds.prodlot
-        ORDER BY quantity DESC
-        LIMIT 5;
+        FROM productdefectresult pdr
+        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
+        LEFT JOIN product p ON p.prodid = pdr.prodid 
+        LEFT JOIN defecttype d on d.defectid = pdr.defectid
+            WHERE pdr.defecttime BETWEEN :start AND :end
+              AND (:productname IS NULL OR p.prodname = :productname)
+              AND (:prodlot IS NULL OR ds.prodlot = :prodlot)
+              AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
+            GROUP BY d.defecttype, ds.prodlot
+            ORDER BY quantity DESC
+            LIMIT 5;
         """
         return db.execute(text(sql), {
             "start": start,
@@ -122,24 +127,26 @@ class DashboardService:
     def top_5_trends(start: datetime, end: datetime, db: Session):
         sql = """
         SELECT 
-            pdr.defecttype,
+            d.defecttype,
             ds.prodlot as line,
             DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
             COUNT(*) AS quantity
-        FROM public.productdefectresult pdr
-        LEFT JOIN public.defectsummary ds ON pdr.prodid = ds.prodid 
+        FROM productdefectresult pdr
+	        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
+	        LEFT JOIN defecttype d on d.defectid = pdr.defectid
         WHERE pdr.defecttime BETWEEN :start AND :end
-        AND pdr.defecttype IN (
-            SELECT pdr2.defecttype
-            FROM public.productdefectresult pdr2
-            LEFT JOIN public.defectsummary ds2 ON pdr2.prodid = ds2.prodid 
-            WHERE pdr2.defecttime BETWEEN :start AND :end
-            GROUP BY pdr2.defecttype
-            ORDER BY COUNT(*) DESC
-            LIMIT 5
-        )
-        GROUP BY pdr.defecttype, hour_slot, ds.prodlot
-        ORDER BY hour_slot, pdr.defecttype;
+	        AND d.defecttype IN (
+	            SELECT d2.defecttype
+	            FROM productdefectresult pdr2
+		            LEFT JOIN defectsummary ds2 ON pdr2.prodid = ds2.prodid 
+		            LEFT JOIN defecttype d2 on d2.defectid = pdr2.defectid
+	            WHERE pdr2.defecttime BETWEEN :start AND :end
+	            GROUP BY d2.defecttype
+	            ORDER BY COUNT(*) DESC
+	            LIMIT 5
+	        )
+        GROUP BY d.defecttype, hour_slot, ds.prodlot
+        ORDER BY hour_slot, d.defecttype;
         """
         result = db.execute(text(sql), {
             "start": start,
@@ -152,10 +159,11 @@ class DashboardService:
         sql = """
         SELECT 
             COUNT(DISTINCT pdr.prodid) as total_products
-        FROM public.productdefectresult pdr
-        LEFT JOIN public.defectsummary ds ON pdr.prodid = ds.prodid
+        FROM productdefectresult pdr
+        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid
+        LEFT JOIN product p ON p.prodid = pdr.prodid 
         WHERE pdr.defecttime BETWEEN :start AND :end
-          AND (:productname IS NULL OR pdr.prodname = :productname)
+          AND (:productname IS NULL OR p.prodname = :productname)
           AND (:prodline IS NULL OR ds.prodlot = :prodline)
           AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
         """
@@ -189,11 +197,12 @@ class DashboardService:
         """ดึงรายการ products สำหรับ dropdown filter"""
         sql = """
         SELECT DISTINCT 
-            pdr.prodname as id,
-            pdr.prodname as name
-        FROM public.productdefectresult pdr
-        WHERE pdr.prodname IS NOT NULL 
-        ORDER BY pdr.prodname
+            p.prodname as id,
+            p.prodname as name
+        FROM productdefectresult pdr
+        LEFT JOIN product p ON p.prodid = pdr.prodid 
+        WHERE p.prodname IS NOT NULL 
+        ORDER BY p.prodname
         """
         result = db.execute(text(sql)).mappings().fetchall()
         return [{"id": row["id"], "name": row["name"]} for row in result]
@@ -217,24 +226,26 @@ class DashboardService:
     def test_top_5_trends(filter: schemas.DashboardFilter, db: Session):
         sql = """
         SELECT 
-            pdr.defecttype,
+            d.defecttype,
             ds.prodlot as line,
             DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
             COUNT(*) AS quantity
-        FROM public.productdefectresult pdr
-        LEFT JOIN public.defectsummary ds ON pdr.prodid = ds.prodid 
+        FROM productdefectresult pdr
+        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
+        LEFT JOIN defecttype d on d.defectid = pdr.defectid
         WHERE pdr.defecttime BETWEEN :start AND :end
-        AND pdr.defecttype IN (
+        AND d.defecttype IN (
             SELECT pdr2.defecttype
-            FROM public.productdefectresult pdr2
-            LEFT JOIN public.defectsummary ds2 ON pdr2.prodid = ds2.prodid 
-            WHERE pdr2.defecttime BETWEEN :start AND :end
-            GROUP BY pdr2.defecttype
+            FROM productdefectresult pdr2
+            LEFT JOIN defectsummary ds2 ON pdr2.prodid = ds2.prodid 
+            LEFT JOIN defecttype d2 on d2.defectid = pdr2.defectid
+            WHERE d2.defecttime BETWEEN :start AND :end
+            GROUP BY d2.defecttype
             ORDER BY COUNT(*) DESC
             LIMIT 5
         )
-        GROUP BY pdr.defecttype, hour_slot, ds.prodlot
-        ORDER BY hour_slot, pdr.defecttype;
+        GROUP BY d.defecttype, hour_slot, ds.prodlot
+        ORDER BY hour_slot, d.defecttype;
         """
         result = db.execute(text(sql), {
             "start": filter.start,

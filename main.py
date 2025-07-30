@@ -19,6 +19,8 @@ from database.role import RoleDB
 from database.permission import PermissionDB
 from database.menu import MenuDB
 from database.dashboard import DashboardService
+from database.model_assignment import ModelAssignmentDB, ModelAssignmentService
+from database.images import ImagesService
 # from database.live_inspection import live_inspection_ws_handler
 # from streaming.live_stream import setup_streaming, websocket_clients
 from fastapi.responses import StreamingResponse, FileResponse
@@ -45,7 +47,9 @@ app = FastAPI(
         {"name": "Transaction", "description": "Lot and quantity tracking"},
         {"name": "ReportProduct", "description": "Product Defect Result"},
         {"name": "ReportDefect", "description": "Report Defect Summary"},
-        {"name": "Dashboard","description": "Dashboard"}
+        {"name": "Dashboard","description": "Dashboard"},
+        {"name": "ModelAssignment","description": "Model Assignment"},
+        {"name": "Image","description": "Result image"},
         # {"name": "Live", "description": "Live Inspection data"},
     ]
 )
@@ -82,6 +86,7 @@ permission_db = PermissionDB()
 menu_db = MenuDB()
 transaction_db = TransactionDB()
 planning_db = PlanningDB()
+model_assignment_db = ModelAssignmentDB()
 
 # -------------------- General --------------------
 @app.get("/", tags=["General"])
@@ -97,9 +102,9 @@ def test_db():
     
 # -------------------- User Service --------------------
 @app.get("/users", tags=["User"])
-def users():
+def users(model: schemas.UserSearch = Depends()):
     try:
-        return {"users": user_db.get_users()}
+        return {"users": user_db.get_users(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -144,20 +149,24 @@ def suggest_username(q: str):
         return user_db.suggest_username(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/suggest-fullname", tags=["User"])
+def suggest_fullname(q: str):
+    try:
+        return user_db.suggest_fullname(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------- Role Service --------------------
-
 @app.get("/roles", tags=["Role"])
-def roles():
-    """Get all roles"""
+def roles(model: schemas.RoleSearch = Depends()):
     try:
-        return {"roles": role_db.get_roles()}
+        return {"roles": role_db.get_roles(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/add-role", tags=["Role"])
 def add_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
-    """Create new role"""
     try:
         return role_db.add_role(role, db)
     except Exception as e:
@@ -165,7 +174,6 @@ def add_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
 
 @app.put("/update-role", tags=["Role"])
 def update_role(roleid: str, role: schemas.RoleUpdate, db: Session = Depends(get_db)):
-    """Update role"""
     try:
         return role_db.update_role(roleid, role, db)
     except Exception as e:
@@ -173,7 +181,6 @@ def update_role(roleid: str, role: schemas.RoleUpdate, db: Session = Depends(get
 
 @app.delete("/delete-role", tags=["Role"])
 def delete_role_api(roleid: str, db: Session = Depends(get_db)):
-    """Delete role"""
     try:
         return role_db.delete_role(roleid, db)
     except Exception as e:
@@ -181,7 +188,6 @@ def delete_role_api(roleid: str, db: Session = Depends(get_db)):
 
 @app.post("/upload-roles", tags=["Role"])
 async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Upload roles from file"""
     try:
         return role_db.upload_roles(uploadby, file, db)
     except Exception as e:
@@ -189,7 +195,6 @@ async def upload_roles(uploadby: str = Form(...), file: UploadFile = File(...), 
 
 @app.get("/suggest-role-name", tags=["Role"])
 def suggest_role_name(q: str):
-    """Get role name suggestions"""
     try:
         return role_db.suggest_role_name(q)
     except Exception as e:
@@ -197,7 +202,6 @@ def suggest_role_name(q: str):
 
 @app.put("/role-permissions", tags=["Role"])
 def get_role_permissions(roleid: int, db: Session = Depends(get_db)):
-    """Get permissions for a role"""
     try:
         return role_db.get_role_permissions(roleid, db)
     except Exception as e:
@@ -205,7 +209,6 @@ def get_role_permissions(roleid: int, db: Session = Depends(get_db)):
 
 @app.put("/update-role-permissions", tags=["Role"])
 def update_role_permissions(roleid: int, permissions_data: dict, db: Session = Depends(get_db)):
-    """Update permissions for a role"""
     try:
         return role_db.update_role_permissions(roleid, permissions_data, db)
     except Exception as e:
@@ -214,9 +217,9 @@ def update_role_permissions(roleid: int, permissions_data: dict, db: Session = D
     
 # -------------------- Product Service --------------------
 @app.get("/products", tags=["Product"])
-def products():
+def products(model: schemas.ProductSearch = Depends()):
     try:
-        return {"products": product_db.get_products()}
+        return {"products": product_db.get_products(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -271,9 +274,9 @@ def suggest_serial_no(q: str):
 
 # -------------------- Product Type Service --------------------
 @app.get("/product-types", tags=["ProductType"])
-def product_types():
+def product_types(model: schemas.ProdTypeSearch = Depends()):
     try:
-        return {"product_types": product_db.get_product_types()}
+        return {"product_types": product_db.get_product_types(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -321,9 +324,9 @@ def suggest_producttype_name(q: str):
 
 # -------------------- Camera Service --------------------
 @app.get("/cameras", tags=["Camera"])
-def cameras():
+def cameras(model: schemas.CameraSearch = Depends()):
     try:
-        return {"cameras": camera_db.get_cameras()}
+        return {"cameras": camera_db.get_cameras(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -355,6 +358,13 @@ async def upload_cameras(uploadby: str = Form(...), file: UploadFile = File(...)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
     
+@app.get("/camera-options", tags=["Camera"])
+def camera_options(q: str):
+    try:
+        return camera_db.camera_options(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/suggest-camera-id", tags=["Camera"])
 def suggest_camera_id(q: str):
     try:
@@ -376,11 +386,18 @@ def suggest_camera_location(q: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.get("/suggest-camera-ip", tags=["Camera"])
+def suggest_camera_ip(q: str):
+    try:
+        return camera_db.suggest_camera_ip(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # -------------------- Defect Types Service --------------------
 @app.get("/defect-types", tags=["DefectType"])
-def get_defect_types():
+def get_defect_types(model: schemas.DefectTypeSearch = Depends()):
     try:
-        return {"defect_types": defect_db.get_defect_types()}
+        return {"defect_types": defect_db.get_defect_types(model)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -428,9 +445,9 @@ def suggest_defecttype_name(q: str):
     
 # -------------------- Planning Service --------------------
 @app.get("/planning", tags=["Planning"])
-def planning():
+def planning(model: schemas.PlanningSearch = Depends()):
     try:
-        return {"planning": planning_db.get_planning()}
+        return planning_db.get_planning(model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -449,9 +466,23 @@ def update_planning(planid: str, plan: schemas.PlanningUpdate, db: Session = Dep
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/delete-planning", tags=["Planning"])
-def delete_planning_api(planid: str, db: Session = Depends(get_db)):
+def delete_planning(planid: str, db: Session = Depends(get_db)):
     try:
-        return PlanningDB().delete_planning(planid, db)
+        return planning_db.delete_planning(planid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.put("/start-planning", tags=["Planning"])
+def start_planning(plan: schemas.PlanningStart, db: Session = Depends(get_db)):
+    try:
+        return planning_db.start_planning(plan, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.put("/stop-planning", tags=["Planning"])
+def stop_planning(plan: schemas.PlanningStop, db: Session = Depends(get_db)):
+    try:
+        return planning_db.stop_planning(plan, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -484,6 +515,31 @@ def suggest_plan_lineid(q: str):
         raise HTTPException(status_code=500, detail=str(e))
     
 # -------------------- Detection Model Service --------------------
+@app.get("/label-class", tags=["Model"])
+def get_label_class(modelversionid : int):
+    try:
+        return DetectionModelDB().get_label_class(modelversionid)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-label-class", tags=["Model"])
+def update_label_class(
+    modelversionid: int,
+    model_list: List[schemas.LabelClassUpdate],
+    db: Session = Depends(get_db)
+):
+    try:
+        return DetectionModelService().update_labelclass(modelversionid, model_list, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.delete("/delete-label-class", tags=["Model"])
+def delete_label_class(classid: int, db: Session = Depends(get_db)):
+    try:
+        return DetectionModelService().delete_labelclass(classid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/suggest-modelname", tags=["Model"])
 def suggest_modelname(q: str):
     try:
@@ -504,13 +560,7 @@ def get_functions():
         return DetectionModelDB().get_functions()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/label-class", tags=["Model"])
-def get_label_class():
-    try:
-        return DetectionModelDB().get_label_class()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
     
 @app.get("/versions", tags=["Model"])
 def get_versions(modelid : int):
@@ -547,17 +597,17 @@ def get_model_version(modelversionid : int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
   
-@app.get("/model-detail", tags=["Model"])
-def model_detail(modelversionid: int, db: Session = Depends(get_db)):
-    try:
-        return DetectionModelService().model_detail(modelversionid, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))  
+# @app.get("/model-detail", tags=["Model"])
+# def model_detail(modelversionid: int, db: Session = Depends(get_db)):
+#     try:
+#         return DetectionModelService().model_detail(modelversionid, db)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))  
     
 @app.get("/detection-model", tags=["Model"])
-def detection_model(db: Session = Depends(get_db)):
+def detection_model(model: schemas.DetectionModelSearch = Depends(), db: Session = Depends(get_db)):
     try:
-        return DetectionModelService().detection_model(db)
+        return DetectionModelService().detection_model(model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -568,10 +618,24 @@ def add_model(model: schemas.DetectionModelCreate, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.post("/duplicate-model", tags=["Model"])
+def duplicate_model(model: schemas.DetectionModelDuplicate, db: Session = Depends(get_db)):
+    try:
+        return DetectionModelService().duplicate_model(model, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.delete("/delete-model", tags=["Model"])
 def delete_model(modelid: str, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().delete_model(modelid, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.delete("/delete-model-version", tags=["Model"])
+def delete_modelversion(modelversionid: str, db: Session = Depends(get_db)):
+    try:
+        return DetectionModelService().delete_modelversion(modelversionid, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -583,28 +647,28 @@ def delete_image(imageid: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/update-model-step1", tags=["Model"])
-def update_model_step1(modelversionid: str, model: schemas.DetectionModelUpdateStep1, db: Session = Depends(get_db)):
+def update_model_step1(modelversionid: int, model: schemas.DetectionModelUpdateStep1, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step1(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
   
 @app.put("/update-model-step2", tags=["Model"])
-def update_model_step2(modelversionid: str, model: schemas.DetectionModelUpdateStep2, db: Session = Depends(get_db)):
+def update_model_step2(modelversionid: int, model: schemas.DetectionModelUpdateStep2, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step2(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/update-model-step3", tags=["Model"])
-def update_model_step3(modelversionid: str, model: schemas.DetectionModelUpdateStep3, db: Session = Depends(get_db)):
+def update_model_step3(modelversionid: int, model: schemas.DetectionModelUpdateStep3, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step3(modelversionid, model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
      
 @app.put("/update-model-step4", tags=["Model"])
-def update_model_step4(modelversionid: str, model: schemas.DetectionModelUpdateStep4, db: Session = Depends(get_db)):
+def update_model_step4(modelversionid: int, model: schemas.DetectionModelUpdateStep4, db: Session = Depends(get_db)):
     try:
         return DetectionModelService().update_model_step4(modelversionid, model, db)
     except Exception as e:
@@ -625,35 +689,39 @@ def upload_image_file(
     annotate: str = Form(...),
     imageid: Optional[int] = Form(None),
     file: Optional[UploadFile] = File(None),
+    size: Optional[int] = Form(None),
+    width: Optional[int] = Form(None),
+    height: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ) -> str:
     try:
-        return DetectionModelService().upload_image_file(modelversionid, modelid, updatedby, annotate, imageid, file, db)
+        return DetectionModelService().upload_image_file(modelversionid, modelid, updatedby, annotate, imageid, file, size, width, height, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
     
+# -------------------- Model Assignment Service --------------------
+@app.get("/model-assignments", tags=["ModelAssignment"])
+def model_assignments(model: schemas.ModelAssignmentSearch = Depends()):
+    try:
+        return {"model_assignments": model_assignment_db.get_model_assignments(model)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/update-model-assignment", tags=["ModelAssignment"])
+def update_model_assignment(id: int, model: schemas.ModelAssignmentUpdate, db: Session = Depends(get_db)):
+    try:
+        return ModelAssignmentService().update_model_assignment(id, model, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # -------------------- Transaction Service --------------------
 @app.get("/transaction", tags=["Transaction"])
-def transaction():
+def transaction(model: schemas.TransactionSearch = Depends()):
     try:
-        return {"transaction": transaction_db.get_transaction()}
+        return transaction_db.get_transaction(model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-transaction", tags=["Transaction"])
-def add_transaction(txn: schemas.TransactionCreate, db: Session = Depends(get_db)):
-    try:
-        return transaction_db.add_transaction(txn, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update-transaction", tags=["Transaction"])
-def update_transaction(runningno: int, txn: schemas.TransactionUpdate, db: Session = Depends(get_db)):
-    try:
-        return transaction_db.update_transaction(runningno, txn, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @app.get("/suggest-transaction-lotno", tags=["Transaction"])
 def suggest_transaction_lotno(q: str):
     try:
@@ -663,26 +731,12 @@ def suggest_transaction_lotno(q: str):
 
 # -------------------- Report Defect Summary Service --------------------
 @app.get("/report-defect-summary", tags=["ReportDefect"])
-def defect_summary():
+def defect_summary(model: schemas.ReportDefectSearch = Depends()):
     try:
-        return {"defect_summary": ReportDB().get_defect_summary()}
+        return ReportDB().get_defect_summary(model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-report-defect", tags=["ReportDefect"])
-def add_report_defect(item: schemas.ReportDefectCreate, db: Session = Depends(get_db)):
-    try:
-        return ReportDB().add_report_defect(item, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update-report-defect", tags=["ReportDefect"])
-def update_report_defect(lotno: str, item: schemas.ReportDefectUpdate, db: Session = Depends(get_db)):
-    try:
-        return ReportDB().update_report_defect(lotno, item, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @app.get("/suggest-defect-lotno", tags=["ReportDefect"])
 def suggest_defect_lotno(q: str):
     try:
@@ -690,32 +744,25 @@ def suggest_defect_lotno(q: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------- Product Defect Result Service --------------------
+# -------------------- Report Product Defect Result Service --------------------
 @app.get("/report-product-defect", tags=["ReportProduct"])
-def product_defect_results():
+def report_product_defect_results(model: schemas.ReportProductSearch = Depends()):
     try:
-        return {"product_defect_results": ReportDB().get_product_defect_results()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.post("/add-report-product", tags=["ReportProduct"])
-def add_report_product(item: schemas.ReportProductCreate, db: Session = Depends(get_db)):
-    try:
-        return ReportDB().add_report_product(item, db)
+        return ReportDB().get_report_product_defect_results(model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/add-report-product-detail", tags=["ReportProduct"])
-def add_product_detail(item: schemas.ProductDetailCreate, db: Session = Depends(get_db)):
+@app.post("/product-defect-detail", tags=["ReportProduct"])
+def report_product_defect_detail(model: schemas.ReportProductSearchDetail, db: Session = Depends(get_db)):
     try:
-        return ReportDB().add_product_detail(item, db)
+        return ReportDB().report_product_defect_detail(model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/update-product-detail", tags=["ReportProduct"])
-def update_report_product(productid: str, item: schemas.ReportProductUpdate, db: Session = Depends(get_db)):
+  
+@app.put("/update-product-defect-detail", tags=["ReportProduct"])
+def update_product_defect_detail(model: schemas.ProductDetailUpdate, db: Session = Depends(get_db)):
     try:
-        return ReportDB().update_report_product(productid, item, db)
+        return ReportDB().update_product_defect_detail(model, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -735,7 +782,6 @@ def login(username: str, password: str, db: Session = Depends(get_db)):
       raise HTTPException(status_code=500, detail=str(e))
     
 # -------------------- Menu Service --------------------
-
 @app.get("/menus", tags=["Menu"])
 def get_menus():
     try:
@@ -841,6 +887,14 @@ def get_cameras_dropdown_list(db: Session = Depends(get_db)):
     
 
 # -------------------- serve image --------------------
+
+@app.get("/result-image", tags=["Image"])
+def result_image(filename: str, defecttime: datetime):
+    try:
+        return ImagesService.result_image(filename, defecttime)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
     
 # @app.get("/files/{full_path:path}")
 # async def serve_image(full_path: str):

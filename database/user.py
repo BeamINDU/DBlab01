@@ -1,7 +1,7 @@
 from database.connect_to_db import engine, Session, text, SQLAlchemyError
-from fastapi import HTTPException
+from fastapi import UploadFile
 import database.schemas as schemas
-from datetime import datetime
+from datetime import datetime, date
 from fastapi.responses import JSONResponse
 from typing import Union, Dict, Any
 from fastapi import UploadFile
@@ -26,17 +26,44 @@ class UserDB:
             print(f"Database error: {e}")
             return []
 
-    def get_users(self):
-        return self._fetch_all("""
-          SELECT  u.*,
-            COALESCE(array_remove(array_agg(ur.roleid), NULL), '{}') AS roles,
-            COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
-          FROM \"user\" u
-          LEFT JOIN userrole ur ON u.userid = ur.userid
-          LEFT JOIN role r ON ur.roleid = r.roleid
-          WHERE u.isdeleted = false 
-          GROUP BY u.userid
-        """)
+    def get_users(self, model: schemas.UserSearch):
+        filters = []
+        params = {}
+
+        if model.userid:
+            filters.append("u.userid ILIKE :userid")
+            params["userid"] = f"%{model.userid}%"
+
+        if model.username:
+            filters.append("u.username ILIKE :username")
+            params["username"] = f"%{model.username}%"
+
+        if model.fullname:
+            filters.append("u.ufname || ' ' || u.ulname ILIKE :fullname")
+            params["fullname"] = f"%{model.fullname}%"
+
+        if model.rolename:
+            filters.append("r.rolename ILIKE :rolename")
+            params["rolename"] = f"%{model.rolename}%"
+
+        if model.userstatus is not None:
+            filters.append("u.userstatus = :userstatus")
+            params["userstatus"] = model.userstatus
+
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
+
+        query = f"""
+            SELECT  u.*,
+              COALESCE(array_remove(array_agg(ur.roleid), NULL), '{{}}') AS roles,
+              COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
+            FROM "user" u
+            LEFT JOIN userrole ur ON u.userid = ur.userid
+            LEFT JOIN role r ON ur.roleid = r.roleid
+            WHERE u.isdeleted = false {where_clause}
+            GROUP BY u.userid
+        """
+      
+        return self._fetch_all(query, params)
 
     def suggest_userid(self, q: str):
         rows = self._fetch_all("""
@@ -58,7 +85,19 @@ class UserDB:
         )
         return [{"value": row["username"], "label": row["username"]} for row in rows]
     
-
+    def suggest_fullname(self, q: str):
+      rows = self._fetch_all("""
+          SELECT DISTINCT u.ufname || ' ' || u.ulname AS fullname
+          FROM "user" u
+          WHERE isdeleted = false 
+          AND userstatus = true
+          AND LOWER(u.ufname) || ' ' || LOWER(u.ulname) ILIKE :fullname
+          ORDER BY fullname ASC
+          LIMIT 10;
+          """,
+          {"fullname": q.lower() + "%"}
+      )
+      return [{"value": row["fullname"], "label": row["fullname"]} for row in rows]
 
 class UserService:
     @staticmethod
@@ -276,51 +315,99 @@ class UserService:
 
     @staticmethod
     async def upload_users(uploadby: str, file: UploadFile, db: Session):
-      try:
-        now = datetime.now()
+        try:
+            filename = file.filename.lower()
+            file.file.seek(0)
+            if filename.endswith(".xlsx") or filename.endswith(".xls"):
+                df = pd.read_excel(file.file, engine="openpyxl")
+            elif filename.endswith(".csv"):
+                df = pd.read_csv(file.file)
+            else:
+                raise error_response(400, detail="File must be .xlsx or .csv")
 
-        # ตรวจสอบประเภทไฟล์
-        filename = file.filename.lower()
-        file.file.seek(0)
-        if filename.endswith(".xlsx") or filename.endswith(".xls"):
-            df = pd.read_excel(file.file, engine="openpyxl")
-        elif filename.endswith(".csv"):
-            df = pd.read_csv(file.file)
-        else:
-            raise error_response(400, "File must be .xlsx or .csv")
+            if df.empty:
+                raise error_response(400, detail="File is empty")
+            schema_query = text("""
+                SELECT column_name, udt_name
+                FROM information_schema.columns
+                WHERE table_name = 'user' AND table_schema = 'public'
+            """)
+            schema_result = db.execute(schema_query).mappings().fetchall()
+            column_types = {row['column_name']: row['udt_name'] for row in schema_result}
 
-        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
-        user_data = []
-        for _, row in df.iterrows():
-            user_data.append({
-                "userid": row.get("User ID"),
-                "ufname": row.get("First Name"),
-                "ulname": row.get("Last Name"),
-                "username": row.get("Username"),
-                "upassword": '',
-                "email": row.get("Email"),
-                "userstatus": row.get("Status", "Active"),
-                "createdby": uploadby,
-                "createddate": now,
-                # "roles": row.get("Role Name"),
-            })
+            postgres_to_python = {
+                'int4': int,
+                'varchar': str,
+                'text': str,
+                'bool': bool,
+                'date': date,
+                'timestamp': datetime
+            }
 
-       
-        # SQL สำหรับ insert
-        insert_sql = """
-            INSERT INTO \"user\" (
-                userid, ufname, ulname, username, upassword, email, userstatus, createdby, createddate
-            )
-            VALUES (
-                :userid, :ufname, :ulname, :username, :upassword, :email, :userstatus, :createdby, :createddate
-            )
-        """
-        # ทำ bulk insert
-        db.execute(text(insert_sql), user_data)
-        db.commit()
-        return success_response(200,{"message": f"{len(user_data)} records uploaded successfully!"})
- 
-      except Exception as e:
-          print(f"Error uploading user: {e}")
-          db.rollback()
-          raise error_response(500, "Failed to upload user")
+            all_data = df.to_dict(orient="records")
+
+
+            for i, row in enumerate(all_data, start=1):
+                print(f"ROW {i}: {row}")
+                userid = row.get('userid')
+                fristname = row.get('fristname')
+                lastname = row.get('lastname')
+                username = row.get('username')
+                password = row.get('password')
+                email = row.get('email')
+                status = True if row.get('Status') == "Active" else False
+                status = str(status).strip().lower() in ["active", "true", "1"]
+                insert_data = {
+                    "userid": userid,
+                    "ufname": fristname,
+                    "ulname": lastname,
+                    "username": username,
+                    "upassword": password,
+                    "email": email,
+                    "userstatus": status
+                }
+                for field, value in insert_data.items():
+                    expected_udt = column_types.get(field)
+                    expected_type = postgres_to_python.get(expected_udt)
+                    if expected_type:
+                        try:
+                            if expected_type == bool:
+                                if isinstance(value, str):
+                                    value = value.strip().lower() in ["true", "active", "1"]
+                                else:
+                                    value = bool(value)
+                            else:
+                                value = expected_type(value)
+                            insert_data[field] = value 
+                        except (ValueError, TypeError):
+                            raise error_response(
+                                400,
+                                detail=f"Row {i}: Field '{field}' must be of type {expected_type.__name__}, "
+                                    f"got '{value}' ({type(value).__name__})"
+                            )
+                sql_check = text("SELECT 1 FROM \"user\" WHERE  userid = :userid")
+                if not db.execute(sql_check, {"userid": insert_data["userid"]}).first():
+                    sql_insert = text("""
+                    INSERT INTO \"user\" ( userid , ufname, ulname, username, upassword, email, userstatus )
+                    VALUES ( :userid, :ufname, :ulname, :username, :upassword, :email, :userstatus )
+                """)
+                    db.execute(sql_insert, insert_data)
+                else:
+                    sql_update = text("""
+                    UPDATE \"user\" SET 
+                        ufname = :ufname, 
+                        ulname = :ulname, 
+                        username = :username,
+                        upassword = :upassword,
+                        email = :email,
+                        userstatus = :userstatus
+                    WHERE userid = :userid
+                """)
+                db.execute(sql_update, insert_data)
+            db.commit()
+            return success_response(200, {"message": "user uploaded successfully"})
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise error_response(500, detail=str(e))

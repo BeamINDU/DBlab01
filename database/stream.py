@@ -8,8 +8,8 @@ def get_live_inspection_data(camera_id, db: Session):
     sql_models = text("""
         SELECT
             m.modelid AS "modelId",
-            m.modelname AS "modelName",
-            m.modeldescription AS "description",
+            mv1.modelname AS "modelName",
+            mv1.modeldescription AS "description",
             STRING_AGG(f.functionname, ', ') AS "function",
             lv.modelstatus AS "statusName",
             lv.versionno AS "currentVersion",
@@ -18,7 +18,7 @@ def get_live_inspection_data(camera_id, db: Session):
             m.createdby AS "createdBy",
             lv.updateddate AS "updatedDate",
             lv.updatedby AS "updatedBy"
-            FROM public.model m
+            FROM model m
             LEFT JOIN (
             SELECT mv1.*
             FROM public.modelversion mv1
@@ -33,8 +33,8 @@ def get_live_inspection_data(camera_id, db: Session):
             WHERE m.isdeleted = false
             GROUP BY
             m.modelid,
-            m.modelname,
-            m.modeldescription,
+            mv1.modelname,
+            mv1.modeldescription,
             lv.modelstatus,
             lv.versionno,
             lv.trainpercent,

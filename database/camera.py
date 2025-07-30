@@ -1,10 +1,11 @@
 from database.connect_to_db import engine, SessionLocal, Session, text, SQLAlchemyError
-from datetime import datetime
+from datetime import datetime, date
 import database.schemas as schemas
 from fastapi.responses import JSONResponse
 from typing import Union, Dict, Any
 from fastapi import UploadFile
 import pandas as pd
+
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -25,9 +26,50 @@ class CameraDB:
             print(f"Database error: {e}")
             return []
         
-    def get_cameras(self):
-        return self._fetch_all("SELECT * FROM camera WHERE isdeleted = false")
+    def get_cameras(self, model: schemas.CameraSearch):
+        filters = []
+        params = {}
+        
+        if model.cameraid:
+            filters.append("cameraid ILIKE :cameraid")
+            params["cameraid"] = f"%{model.cameraid}%"
 
+        if model.cameraname:
+            filters.append("cameraname ILIKE :cameraname")
+            params["cameraname"] = f"%{model.cameraname}%"
+
+        if model.cameraip:
+            filters.append("cameraip ILIKE :cameraip")
+            params["cameraip"] = f"%{model.cameraip}%"
+
+        if model.cameralocation:
+            filters.append("cameralocation ILIKE :cameralocation")
+            params["cameralocation"] = f"%{model.cameralocation}%"
+
+        if model.camerastatus is not None:
+            filters.append("camerastatus = :camerastatus")
+            params["camerastatus"] = model.camerastatus
+
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
+
+        query = f"""
+            SELECT * FROM camera
+            WHERE isdeleted = false {where_clause}
+            ORDER BY cameraname
+        """
+
+        return self._fetch_all(query, params)
+
+    def camera_options(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT cameraid, cameraname FROM camera
+            WHERE isdeleted = false AND camerastatus = true AND LOWER(cameraid) LIKE LOWER(:keyword)
+            ORDER BY cameraid ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["cameraid"], "label": row["cameraname"]} for row in rows]
+    
     def suggest_camera_id(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT cameraid FROM camera
@@ -58,6 +100,15 @@ class CameraDB:
         )
         return [{"value": row["cameralocation"], "label": row["cameralocation"]} for row in rows]
 
+    def suggest_camera_ip(self, q: str):
+        rows = self._fetch_all("""
+            SELECT DISTINCT cameraip FROM camera
+            WHERE isdeleted = false AND camerastatus = true AND LOWER(cameraip) LIKE LOWER(:keyword)
+            ORDER BY cameraip ASC
+            LIMIT 10; """,
+            {"keyword": q + "%"}
+        )
+        return [{"value": row["cameraip"], "label": row["cameraip"]} for row in rows]
 
 class CameraService:
     @staticmethod
@@ -84,6 +135,7 @@ class CameraService:
                 UPDATE camera SET
                     cameraname = :cameraname,
                     cameralocation = :cameralocation,
+                    cameraip = :cameraip,
                     camerastatus = :camerastatus,
                     createdby = :createdby,
                     createddate = :createddate,
@@ -94,6 +146,7 @@ class CameraService:
                 "cameraid": camera.cameraid,
                 "cameraname": camera.cameraname,
                 "cameralocation": camera.cameralocation,
+                "cameraip": camera.cameraip,
                 "camerastatus": bool(camera.camerastatus),
                 "createdby": camera.createdby,
                 "createddate": now,
@@ -104,10 +157,10 @@ class CameraService:
           # Insert new record
           insert_sql = text("""
               INSERT INTO camera (
-                  cameraid, cameraname, cameralocation,
+                  cameraid, cameraname, cameralocation, cameraip,
                   camerastatus, createdby, createddate, isdeleted
               ) VALUES (
-                  :cameraid, :cameraname, :cameralocation,
+                  :cameraid, :cameraname, :cameralocation, :cameraip,
                   :camerastatus, :createdby, :createddate, false
               )
           """)
@@ -115,6 +168,7 @@ class CameraService:
               "cameraid": camera.cameraid,
               "cameraname": camera.cameraname,
               "cameralocation": camera.cameralocation,
+              "cameraip": camera.cameraip,
               "camerastatus": camera.camerastatus,
               "createdby": camera.createdby,
               "createddate": now,
@@ -161,6 +215,7 @@ class CameraService:
         # field other
         if camera.cameraname is not None: update_fields["cameraname"] = camera.cameraname
         if camera.cameralocation is not None: update_fields["cameralocation"] = camera.cameralocation
+        if camera.cameraip is not None: update_fields["cameraip"] = camera.cameraip
         if camera.camerastatus is not None: update_fields["camerastatus"] = camera.camerastatus
         update_fields["isdeleted"] = False
 
@@ -186,48 +241,97 @@ class CameraService:
 
     @staticmethod
     async def upload_cameras(uploadby: str, file: UploadFile, db: Session):
-      try:
-        now = datetime.now()
+        try:
+            filename = file.filename.lower()
+            file.file.seek(0)
+            if filename.endswith(".xlsx") or filename.endswith(".xls"):
+                df = pd.read_excel(file.file, engine="openpyxl")
+            elif filename.endswith(".csv"):
+                df = pd.read_csv(file.file)
+            else:
+                raise error_response(400, detail="File must be .xlsx or .csv")
 
-        # ตรวจสอบประเภทไฟล์
-        filename = file.filename.lower()
-        file.file.seek(0)
-        if filename.endswith(".xlsx") or filename.endswith(".xls"):
-            df = pd.read_excel(file.file, engine="openpyxl")
-        elif filename.endswith(".csv"):
-            df = pd.read_csv(file.file)
-        else:
-            raise error_response(400, "File must be .xlsx or .csv")
- 
-        # แปลงข้อมูลแต่ละแถวเป็น dict ที่ตรงกับ SQL
-        camera_data = []
-        for _, row in df.iterrows():
-            camera_data.append({
-                "cameraid": row.get("Camera ID"),
-                "cameraname": row.get("Camera Name"),
-                "cameralocation": row.get("Location"),
-                "camerastatus": row.get("Status", "Active"),
-                "createdby": uploadby,
-                "createddate": now,
-            })
- 
-        # SQL สำหรับ insert
-        insert_sql = """
-            INSERT INTO prodtype (
-                cameraid, cameraname, cameralocation, camerastatus, createdby, createddate
-            )
-            VALUES (
-                :cameraid, :cameraname, :cameralocation, :camerastatus, :createdby, :createddate
-            )
-        """
-        # ทำ bulk insert
-        db.execute(text(insert_sql), camera_data)
-        db.commit()
-        return success_response(200,{"message": f"{len(camera_data)} records uploaded successfully!"})
- 
-      except Exception as e:
-          print(f"Error uploading camera: {e}")
-          db.rollback()
-          raise error_response(500, "Failed to upload camera")
-      
+            if df.empty:
+                raise error_response(400, detail="File is empty")
+
+            schema_query = text("""
+                SELECT column_name, udt_name
+                FROM information_schema.columns
+                WHERE table_name = 'camera' AND table_schema = 'public'
+            """)
+            schema_result = db.execute(schema_query).mappings().fetchall()
+            column_types = {row['column_name']: row['udt_name'] for row in schema_result}
+
+            postgres_to_python = {
+                'int4': int,
+                'varchar': str,
+                'text': str,
+                'bool': bool,
+                'date': date,
+                'timestamp': datetime
+            }
+
+            all_data = df.to_dict(orient="records")
+            for i, row in enumerate(all_data, start=1):
+                print(f"ROW {i}: {row}")
+                camId = row.get('camera ID')
+                camName = row.get('camera name')
+                camLocation = row.get('camera location')
+                camip = row.get('camera ip')
+                status = True if row.get('Status') == "Active" else False
+                status = str(status).strip().lower() in ["active", "true", "1"]
+                insert_data = {
+                    "cameraid": camId,
+                    "cameraname": camName,
+                    "cameralocation": camLocation,
+                    "camerastatus": status,
+                    "cameraip": camip
+                }
+                for field, value in insert_data.items():
+                    expected_udt = column_types.get(field)
+                    expected_type = postgres_to_python.get(expected_udt)
+                    if expected_type:
+                        try:
+                            if expected_type == bool:
+                                if isinstance(value, str):
+                                    value = value.strip().lower() in ["true", "active", "1"]
+                                else:
+                                    value = bool(value)
+                            else:
+                                value = expected_type(value)
+                            insert_data[field] = value 
+                        except (ValueError, TypeError):
+                            raise error_response(
+                                400,
+                                detail=f"Row {i}: Field '{field}' must be of type {expected_type.__name__}, "
+                                    f"got '{value}' ({type(value).__name__})"
+                            )
+                sql_check = text("SELECT 1 FROM camera WHERE  cameraid = :cameraid")
+                data_check = db.execute(sql_check, {"cameraid": insert_data["cameraid"]}).first()
+                if not data_check:
+                    sql_insert = text("""
+                        INSERT INTO camera ( cameraid , cameraname, cameralocation, camerastatus , cameraip)
+                        VALUES ( :cameraid, :cameraname, :cameralocation, :camerastatus, :cameraip )
+                """)
+                    db.execute(sql_insert, insert_data)
+                elif data_check.isdeleted:
+                    sql_update = text("""
+                        UPDATE camera SET 
+                            cameraname = :cameraname, 
+                            cameralocation = :cameralocation, 
+                            camerastatus = :camerastatus,
+                            cameraip = :cameraip
+                        WHERE cameraid = :cameraid
+                """)
+                    db.execute(sql_update, insert_data)
+                else : 
+                    return error_response(400, "Camera ID already exists")
+
+                db.commit()
+            return success_response(200, {"message": "camera uploaded successfully"})
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise error_response(500, detail=str(e))
 

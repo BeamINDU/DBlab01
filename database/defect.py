@@ -26,8 +26,31 @@ class DefectDB:
             print(f"Database error: {e}")
             return []
         
-    def get_defect_types(self):
-        return self._fetch_all("SELECT * FROM defecttype WHERE isdeleted = false")
+    def get_defect_types(self, model: schemas.DefectTypeSearch):
+        filters = []
+        params = {}
+        
+        if model.defectid:
+            filters.append("defectid ILIKE :defectid")
+            params["defectid"] = f"%{model.defectid}%"
+
+        if model.defecttype:
+            filters.append("defecttype ILIKE :defecttype")
+            params["defecttype"] = f"%{model.defecttype}%"
+
+        if model.defectstatus is not None:
+            filters.append("defectstatus = :defectstatus")
+            params["defectstatus"] = model.defectstatus
+
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
+
+        query = f"""
+            SELECT * FROM defecttype
+            WHERE isdeleted = false {where_clause}
+            ORDER BY defecttype
+        """
+
+        return self._fetch_all(query, params)
     
     def suggest_defecttype_id(self, q: str):
         rows = self._fetch_all("""
