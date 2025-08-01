@@ -84,14 +84,29 @@ class ModelAssignmentService:
             current_prodid = current_record.prodid
             current_cameraid = current_record.cameraid
             current_modelversionid = current_record.modelversionid
-
             # print("modelid", model.modelid)
             # print("current_modelversionid", current_modelversionid)
             # print("new_modelversionid", model.modelversionid)
+            
+            # ดึงข้อมูล modelversion
+            modelversion_record = db.execute(
+                text("SELECT modelstatus FROM modelversion WHERE modelversionid = :modelversionid"),
+                {"modelversionid": model.modelversionid}
+            ).first()
+
+            if not modelversion_record:
+                return error_response(404, "Model version not found")
+
+            # ตรวจสอบ modelversionid มี status = Using หรือไม่
+            modelstatus = modelversion_record.modelstatus
+            # print("modelstatus", modelstatus)
+
+            if modelstatus != "Using":
+              return error_response(400, "This model is not ready for use.")
 
             # ตรวจสอบ modelversionid
             if model.modelversionid != current_modelversionid:
-              if db.execute(text("SELECT 1 FROM modelversion WHERE modelversionid = :modelversionid"), {"modelversionid": model.modelversionid}).first():
+              if not modelversion_record:
                   return error_response(400, f"Model version {model.version} already exists.")
 
             # ตรวจสอบซ้ำของ productId และ cameraId

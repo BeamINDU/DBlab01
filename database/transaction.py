@@ -29,64 +29,61 @@ class TransactionDB:
         where_filters = []
         params = {}
 
+        # --- Allowed fields for sorting ---
         allowed_order_fields = [ "actualstartdatetime", "actualenddatetime", "prodlot", "prodid", "prodname", "quantity" ]
-
         order_by = model.order_by if model.order_by in allowed_order_fields else "actualstartdatetime"
-        order_dir = "DESC" if model.order_dir.lower() == "desc" else "ASC"
+        order_dir = "DESC" if str(model.order_dir).lower() == "desc" else "ASC"
 
-        if model.startdate:
-            where_filters.append("t.actualstartdatetime >= :startdate")
-            params["startdate"] = model.startdate
+        # --- Helper for adding filters ---
+        def add_filter(condition, key, value):
+            if value is not None:
+                where_filters.append(condition)
+                params[key] = value
 
-        if model.enddate:
-            where_filters.append("t.actualenddatetime <= :enddate")
-            params["enddate"] = model.enddate
+        add_filter("t.actualstartdatetime >= :startdate", "startdate", model.startdate)
+        add_filter("t.actualenddatetime <= :enddate", "enddate", model.enddate)
+        add_filter("t.prodlot ILIKE :prodlot", "prodlot", f"%{model.prodlot}%" if model.prodlot else None)
+        add_filter("t.prodid ILIKE :prodid", "prodid", f"%{model.prodid}%" if model.prodid else None)
+        add_filter("p.prodname ILIKE :prodname", "prodname", f"%{model.prodname}%" if model.prodname else None)
 
-        if model.prodlot:
-            where_filters.append("t.prodlot ILIKE :prodlot")
-            params["prodlot"] = f"%{model.prodlot}%"
-
-        if model.prodid:
-            where_filters.append("t.prodid ILIKE :prodid")
-            params["prodid"] = f"%{model.prodid}%"
-
-        if model.prodname:
-            where_filters.append("p.prodname ILIKE :prodname")
-            params["prodname"] = f"%{model.prodname}%"
-
-        where_clause = " WHERE " + " AND ".join(where_filters) if where_filters else ""
+        where_clause = f"WHERE {' AND '.join(where_filters)}" if where_filters else ""
 
         # --- Pagination ---
-        page = model.page or 1
-        page_size = model.pageSize or 10
+        page = max(model.page or 1, 1)
+        page_size = min(max(model.pageSize or 10, 1), 100) 
         offset = (page - 1) * page_size
+        params["limit"] = page_size
+        params["offset"] = offset
 
-        # --- Main Query (with LIMIT) ---
-        main_query = f"""
-            SELECT t.transactionid, t.prodlot, t.prodid, p.prodname, t.actualstartdatetime, t.actualenddatetime, t.quantity
+        # --- Base Select ---
+        base_query = """
             FROM transactionreport t
-            LEFT JOIN product p ON p.prodid = t.prodid 
+            LEFT JOIN product p ON p.prodid = t.prodid
+        """
+
+        # --- Main Query ---
+        main_query = f"""
+            SELECT
+                t.transactionid, t.prodlot, t.prodid,
+                p.prodname, t.actualstartdatetime,
+                t.actualenddatetime, t.quantity
+            {base_query}
             {where_clause}
             ORDER BY {order_by} {order_dir}
             LIMIT :limit OFFSET :offset
         """
-        
-        params["limit"] = page_size
-        params["offset"] = offset
 
-        # --- Total Count Query ---
+        # --- Count Query ---
         count_query = f"""
-            SELECT COUNT(*) FROM (
+            SELECT COUNT(*) AS count
+            FROM (
                 SELECT 1
-                FROM transactionreport t
-                LEFT JOIN product p ON p.prodid = t.prodid 
+                {base_query}
                 {where_clause}
-            ) AS count
+            ) AS subquery
         """
 
-        print("SQL Query:", main_query)
-        # print("Parameters:", params)
-
+        # --- Execute ---
         total = self._fetch_one(count_query, params)["count"]
         items = self._fetch_all(main_query, params)
 
@@ -94,7 +91,7 @@ class TransactionDB:
             "total": total,
             "items": items
         }
-    
+
     def suggest_transaction_lotno(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodlot FROM transactionreport

@@ -525,10 +525,21 @@ class DetectionModelService:
     
     @staticmethod
     def delete_modelversion(modelversionid: int, db: Session):
-        if not db.execute(text("SELECT 1 FROM modelversion WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid}).first():
-            return error_response(404, "Model version not found")
+        
+        modelversion_record = db.execute(
+              text("SELECT modelstatus FROM modelversion WHERE modelversionid = :modelversionid"),
+              {"modelversionid": modelversionid}
+          ).first()
+        
+        if not modelversion_record:
+              return error_response(404, "Model version not found")
 
+        modelstatus = modelversion_record.modelstatus
+        if modelstatus == "Using":
+            return error_response(404, "This model is already use.")
+        
         db.execute(text("DELETE FROM cameramodelprodapplied WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid})
+        db.execute(text("DELETE FROM labelclass WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid})
         db.execute(text("DELETE FROM modelfunction WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid})
         db.execute(text("DELETE FROM image WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid})
         db.execute(text("DELETE FROM modelversion WHERE modelversionid = :modelversionid"), {"modelversionid": modelversionid})
@@ -725,42 +736,18 @@ class DetectionModelService:
       # Update 'currentstep'
       db.execute(text("""
           UPDATE modelversion
-          SET currentstep = :currentstep,
+          SET modelstatus = :modelversion,
+              currentstep = :currentstep,
               updatedby = :updatedby,
-              updateddate = :updateddate,
+              updateddate = :updateddate
           WHERE modelversionid = :modelversionid
       """), {
+          "modelversion": 'Ready',
           "currentstep": 4,
           "updatedby": model.updatedby,
           "updateddate": now,
           "modelversionid": modelversionid
       })
-
-      # Update 'cameramodelprodapplied'
-      # db.execute(text("""
-      #     UPDATE cameramodelprodapplied
-      #     SET appliedstatus = :appliedstatus,
-      #         applieddate = :applieddate,
-      #         appliedby = :appliedby
-      #     WHERE modelversionid = :modelversionid
-      # """), {
-      #     "appliedstatus": True,
-      #     "applieddate": now,
-      #     "appliedby": model.updatedby,
-      #     "modelversionid": modelversionid
-      # })
-
-      # Update 'modelversion' อื่นที่มี modelid เดียวกัน แต่ไม่ใช่ตัวปัจจุบัน ให้เป็น "Ready"
-      # db.execute(text("""
-      #     UPDATE modelversion
-      #     SET modelstatus = 'Ready'
-      #     WHERE modelid = :modelid
-      #       AND modelstatus != 'Processing'
-      #       AND modelversionid != :modelversionid          
-      # """), {
-      #     "modelid": model.modelid,
-      #     "modelversionid": modelversionid
-      # })
 
       db.commit()
       return success_response(200, {"modelversionid": modelversionid})

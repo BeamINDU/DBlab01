@@ -466,9 +466,9 @@ def update_planning(planid: str, plan: schemas.PlanningUpdate, db: Session = Dep
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/delete-planning", tags=["Planning"])
-def delete_planning(planid: str, db: Session = Depends(get_db)):
+def delete_planning(planid: str, updatedby: str, db: Session = Depends(get_db)):
     try:
-        return planning_db.delete_planning(planid, db)
+        return planning_db.delete_planning(planid, updatedby, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -790,10 +790,20 @@ def get_menus():
         raise HTTPException(status_code=500, detail=str(e))
   
 # -------------------- Dashboard Service --------------------
-@app.get("/dashboard-defectscamera", tags=["Dashboard"])
-def endpoint_defects_camera(start: datetime, end: datetime, db: Session = Depends(get_db)):
+
+@app.get("/dashboard-totalproduct", tags=["Dashboard"])
+def endpoint_total_products(
+    start: datetime,
+    end: datetime,
+    productname: Optional[str] = Query(None),
+    prodline: Optional[str] = Query(None),
+    cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
     try:
-      return DashboardService.get_defects_with_ng_gt_zero(start, end, db)
+        return DashboardService.get_total_products(start, end, productname, prodline, cameraid, month, year, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -804,24 +814,28 @@ def endpoint_ratio(
     productname: Optional[str] = Query(None),
     prodline: Optional[str] = Query(None),
     cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     try:
-      return DashboardService.get_ratio(start, end, productname, prodline, cameraid, db)
+        return DashboardService.get_ratio(start, end, productname, prodline, cameraid, month, year, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/dashboard-ngdistribution", tags=["Dashboard"])
-def endpoint_distribution(
+@app.get("/dashboard-top5trends", tags=["Dashboard"])
+def endpoint_top5trends(
     start: datetime,
     end: datetime,
     productname: Optional[str] = Query(None),
     prodline: Optional[str] = Query(None),
     cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     try:
-      return DashboardService.ng_distribution(start, end, productname, prodline, cameraid, db)
+        return DashboardService.top_5_trends(start, end, productname, prodline, cameraid, month, year, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -832,35 +846,44 @@ def endpoint_top5defects(
     productname: Optional[str] = Query(None),
     prodline: Optional[str] = Query(None),
     cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     try:
-      return DashboardService.top_5_defects(start, end, productname, prodline, cameraid, db)
+        return DashboardService.top_5_defects(start, end, productname, prodline, cameraid, month, year, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/dashboard-top5trends", tags=["Dashboard"])
-def endpoint_top5trends(
-    start: datetime,
-    end: datetime,
-    db: Session = Depends(get_db)
-):
-    try:
-      return DashboardService.top_5_trends(start, end, db)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/dashboard-totalproduct", tags=["Dashboard"])
-def get_total_products(
+@app.get("/dashboard-ngdistribution", tags=["Dashboard"])
+def endpoint_distribution(
     start: datetime,
     end: datetime,
     productname: Optional[str] = Query(None),
     prodline: Optional[str] = Query(None),
     cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     try:
-        return DashboardService.get_total_products(start, end, productname, prodline, cameraid, db)
+        return DashboardService.ng_distribution(start, end, productname, prodline, cameraid, month, year, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/dashboard-defectscamera", tags=["Dashboard"])
+def endpoint_defects_camera(
+    start: datetime,
+    end: datetime,
+    productname: Optional[str] = Query(None),
+    prodline: Optional[str] = Query(None),
+    cameraid: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        return DashboardService.get_defects_with_ng_gt_zero(start, end, productname, prodline, cameraid, month, year, db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -883,8 +906,7 @@ def get_cameras_dropdown_list(db: Session = Depends(get_db)):
     try:
         return DashboardService.get_cameras_list(db)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        raise HTTPException(status_code=500, detail=str(e))    
 
 # -------------------- serve image --------------------
 

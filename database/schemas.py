@@ -190,11 +190,18 @@ class PlanningUpdate(BaseModel):
 
 class PlanningStart(BaseModel):
     planid: str
-    updatedby: Optional[str] = Field(default=None)
+    prodid: str
+    prodlot: str
+    prodline: str
+    startby: Optional[str] = Field(default=None)
 
 class PlanningStop(BaseModel):
     planid: str
-    updatedby: Optional[str] = Field(default=None)
+    prodid: str
+    prodlot: str
+    prodline: str
+    seq_no:  int
+    stopby: Optional[str] = Field(default=None)
 
 class DetectionModelSearch(BaseModel):
     modelname: Optional[str] = Field(default=None, alias="modelName")

@@ -35,7 +35,7 @@ class PlanningDB:
             print(f"Database error: {e}")
             return []
         
-    def get_planning(self, model: schemas.PlanningSearch):
+    def get_planning_bak(self, model: schemas.PlanningSearch):
         where_filters = []
         params = {}
 
@@ -105,6 +105,85 @@ class PlanningDB:
         # print("SQL Query:", main_query)
         # print("Parameters:", params)
 
+        total = self._fetch_one(count_query, params)["count"]
+        items = self._fetch_all(main_query, params)
+
+        return {
+            "total": total,
+            "items": items
+        }
+
+    def get_planning(self, model: schemas.PlanningSearch):
+        where_filters = []
+        params = {}
+
+        # --- Allowed Fields for ORDER BY ---
+        allowed_order_fields = [
+            "planid", "startdatetime", "enddatetime", "actualstartdatetime",
+            "actualenddatetime", "prodid", "prodname", "prodlot", "prodline", "quantity"
+        ]
+        order_by = model.order_by if model.order_by in allowed_order_fields else "startdatetime"
+        order_dir = "DESC" if str(model.order_dir).lower() == "desc" else "ASC"
+
+        # --- Filters ---
+        def add_filter(condition, key, value):
+            if value is not None:
+                where_filters.append(condition)
+                params[key] = value
+
+        add_filter("p.startdatetime >= :startdatetime", "startdatetime", model.startdatetime)
+        add_filter("p.enddatetime <= :enddatetime", "enddatetime", model.enddatetime)
+        add_filter("p.planid ILIKE :planid", "planid", f"%{model.planid}%" if model.planid else None)
+        add_filter("p.prodid ILIKE :prodid", "prodid", f"%{model.prodid}%" if model.prodid else None)
+        add_filter("mp.prodname ILIKE :prodname", "prodname", f"%{model.prodname}%" if model.prodname else None)
+        add_filter("p.prodlot ILIKE :prodlot", "prodlot", f"%{model.prodlot}%" if model.prodlot else None)
+        add_filter("p.prodline ILIKE :prodline", "prodline", f"%{model.prodline}%" if model.prodline else None)
+
+        where_clause = f"WHERE {' AND '.join(where_filters)}" if where_filters else ""
+
+        # --- Pagination ---
+        page = max(model.page or 1, 1)
+        page_size = min(max(model.pageSize or 10, 1), 100)
+        offset = (page - 1) * page_size
+        params["limit"] = page_size
+        params["offset"] = offset
+
+        # --- Base SQL Select ---
+        base_select = """
+            SELECT 
+                p.planid, p.startdatetime, p.enddatetime, s.actualstartdatetime, s.actualenddatetime,
+                p.prodid, mp.prodname, p.prodlot, p.prodline, p.quantity, s.seq_no
+            FROM planning p
+            LEFT JOIN (
+                SELECT DISTINCT ON (planid, prodid, prodlot, prodline)
+                    planid, prodid, prodlot, prodline, seq_no, actualstartdatetime, actualenddatetime
+                FROM planningseq
+                ORDER BY planid, prodid, prodlot, prodline, seq_no DESC
+            ) s ON p.planid = s.planid
+              AND p.prodid = s.prodid
+              AND p.prodlot = s.prodlot
+              AND p.prodline = s.prodline
+            LEFT JOIN product mp ON mp.prodid = p.prodid
+            WHERE p.isdeleted = false
+        """
+
+        # --- Main Query ---
+        main_query = f"""
+            {base_select}
+            {where_clause}
+            ORDER BY {order_by} {order_dir}
+            LIMIT :limit OFFSET :offset
+        """
+
+        # --- Count Query ---
+        count_query = f"""
+            SELECT COUNT(*) AS count FROM (
+                {base_select}
+                {where_clause}
+            ) AS subquery
+        """
+
+        # --- Execute Queries ---
         total = self._fetch_one(count_query, params)["count"]
         items = self._fetch_all(main_query, params)
 
@@ -254,7 +333,7 @@ class PlanningDB:
           db.rollback()
           return error_response(500, f"Database error: {str(e)}")
     
-    def delete_planning(self, planid: str, db: Session):
+    def delete_planning(self, planid: str, updatedby: str, db: Session):
         # check planid
         planning_record = db.execute(text("""
             SELECT prodlot, prodid FROM planning WHERE planid = :planid
@@ -262,25 +341,24 @@ class PlanningDB:
 
         if not planning_record:
             return error_response(404, "Plan not found")
+        
+        # soft delete with audit
+        db.execute(text("""
+            UPDATE planning
+            SET isdeleted = true,
+                updateddate = :updateddate,
+                updatedby = :updatedby
+            WHERE planid = :planid
+        """), {
+            "updateddate": datetime.now(),
+            "updatedby": updatedby,
+            "planid": planid,
+        })
 
-        prodlot, prodid = planning_record
-
-        # check in transactionreport
-        transaction_exists = db.execute(text("""
-            SELECT 1 FROM transactionreport
-            WHERE prodlot = :prodlot AND prodid = :prodid
-            LIMIT 1
-        """), {"prodlot": prodlot, "prodid": prodid}).first()
-
-        if transaction_exists:
-            return error_response(400, f"Cannot delete: This planning is used in transactionreport.")
-
-        # delete
-        db.execute(text("DELETE FROM planning WHERE planid = :planid"), {"planid": planid})
         db.commit()
         return success_response(200, {"planid": planid, "isdeleted": True})
     
-    def start_planning(self, plan: schemas.PlanningStart, db: Session):
+    def start_planning_bak(self, plan: schemas.PlanningStart, db: Session):
         now = datetime.now()
 
         planning_record = db.execute(text("""
@@ -311,7 +389,7 @@ class PlanningDB:
             "updateddate": str(now)
         })
 
-    def stop_planning(self, plan: schemas.PlanningStop, db: Session):
+    def stop_planning_bak(self, plan: schemas.PlanningStop, db: Session):
         now = datetime.now()
 
         planning_record = db.execute(text("""
@@ -341,6 +419,131 @@ class PlanningDB:
             "updateddate": str(now)
         })
     
+    def start_planning(self, plan: schemas.PlanningStart, db: Session):
+        now = datetime.now()
+
+        # ดึง cameraid จาก planid
+        camera_row = db.execute(text("""
+          SELECT p.planid, cm.cameraid
+          FROM planning p
+          LEFT JOIN cameramodelprodapplied cm
+            ON p.prodid = cm.prodid
+          WHERE cm.appliedstatus = true
+            AND p.planid = :planid
+          ORDER BY p.planid ASC
+          LIMIT 1
+          """), {"planid": plan.planid}).first()
+
+        if not camera_row:
+            return error_response(404, "ไม่พบกล้องสำหรับแผนนี้")
+
+        cameraid = camera_row.cameraid
+
+        # เช็คว่าแผนอื่นในสายการผลิตและกล้องนี้ กำลังทำงานอยู่หรือไม่
+        active_plan = db.execute(text("""
+            SELECT p.planid AS active_plan
+            FROM planning p
+            LEFT JOIN planningseq s 
+              ON p.planid = s.planid
+              AND p.prodid = s.prodid
+              AND p.prodlot = s.prodlot
+              AND p.prodline = s.prodline
+            LEFT JOIN cameramodelprodapplied c 
+              ON c.prodid = p.prodid
+            WHERE p.prodline = :prodline
+              AND c.cameraid = :cameraid
+              AND s.actualstartdatetime IS NOT NULL
+              AND s.actualenddatetime IS NULL
+
+            UNION ALL	
+
+            SELECT 'No Plan Active' AS active_plan
+            WHERE NOT EXISTS (
+              SELECT *
+              FROM planning p
+              LEFT JOIN planningseq s 
+                ON p.planid = s.planid
+                AND p.prodid = s.prodid
+                AND p.prodlot = s.prodlot
+                AND p.prodline = s.prodline
+              LEFT JOIN cameramodelprodapplied c 
+                ON c.prodid = p.prodid
+              WHERE p.prodline = :prodline
+                AND c.cameraid = :cameraid
+                AND s.actualstartdatetime IS NOT NULL
+                AND s.actualenddatetime IS NULL
+            );
+        """), {"prodline": plan.prodline, "cameraid": cameraid}).first()
+
+        # Insert data into planningseq 
+        if active_plan is None or active_plan.active_plan == 'No Plan Active':
+            try:
+                result = db.execute(text("""
+                    INSERT INTO public.planningseq (
+                        planid, prodid, prodlot, prodline, actualstartdatetime, actualenddatetime, startby
+                    ) VALUES (
+                        :planid, :prodid, :prodlot, :prodline, :actualstartdatetime, NULL, :startby
+                    )
+                    RETURNING seq_no;
+                """), {
+                    "planid": plan.planid,
+                    "prodid": plan.prodid,
+                    "prodlot": plan.prodlot,
+                    "prodline": plan.prodline,
+                    "actualstartdatetime": now,
+                    "startby": plan.startby
+                })
+                seq_no = result.scalar() 
+                db.commit()
+
+            except Exception as e:
+                db.rollback()
+                return error_response(500, f"Failed to save data due to an error: {str(e)}")
+
+        else:
+            return error_response(404, f"A plan is already running on Line {plan.prodline} and camera {cameraid}")
+
+        return success_response(200, {
+            "planid": plan.planid,
+            "actualstartdatetime": str(now),
+            "seq_no": seq_no,
+        })
+
+    def stop_planning(self, plan: schemas.PlanningStop, db: Session):
+        now = datetime.now()
+
+        planning_record = db.execute(text("""
+            SELECT planid FROM planningseq WHERE planid = :planid
+        """), {"planid": plan.planid}).first()
+
+        if not planning_record:
+            return error_response(404, "Plan not found")
+
+        db.execute(text("""
+            UPDATE planningseq
+            SET actualenddatetime= :actualenddatetime, stopby = :stopby
+            WHERE planid= :planid 
+              AND prodid= :prodid 
+              AND prodlot= :prodlot 
+              AND prodline=:prodline 
+              AND seq_no=:seq_no;
+
+        """), {
+            "actualenddatetime": now,
+            "stopby": plan.stopby,
+            "planid": plan.planid,
+            "prodid": plan.prodid,
+            "prodlot": plan.prodlot,
+            "prodline": plan.prodline,
+            "seq_no": plan.seq_no,
+        })
+
+        db.commit()
+        return success_response(200, {
+            "planid": plan.planid,
+            "actualenddatetime": str(now),
+        })
+       
     async def upload_planning(uploadby: str, file: UploadFile, db: Session):
       try:
         now = datetime.now()

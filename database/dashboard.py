@@ -1,208 +1,459 @@
-# from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 from typing import Optional
 from datetime import datetime
 import database.schemas as schemas
-# from database.connect_to_db import get_db
+
 
 class DashboardService:
-    @staticmethod
-    def get_defects_with_ng_gt_zero(start: datetime, end: datetime, db: Session):
-        sql = """
-        SELECT 
-            pdr.prodid,
-            pdr.defectid,
-            dt.defecttype,
-            pdr.cameraid,
-            ds.prodlot AS LINE,
-            cam.cameraname,
-            COALESCE(ds.totalng, 0) AS totalng,
-            pdr.defecttime
-        FROM productdefectresult pdr
-        LEFT JOIN defecttype dt ON pdr.defectid = dt.defectid
-        LEFT JOIN camera cam ON pdr.cameraid = cam.cameraid
-        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid AND pdr.defectid = ds.defectid
-        WHERE COALESCE(ds.totalng, 0) > 0
-          AND pdr.defecttime BETWEEN :start AND :end
-        """
-        result = db.execute(text(sql), {
-            "start": start,
-            "end": end
-        }).mappings().fetchall()
-        return result
-
-    @staticmethod
-    def get_ratio(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
-        sql = """
-        SELECT
-            p.prodname,
-            p.cameraid,
-            ds.prodlot as line,
-            ds.total_ok,
-            ds.total_ng,
-            ROUND(ds.total_ok::numeric * 100 / NULLIF(ds.total_ok + ds.total_ng, 0), 2) AS ok_ratio_percent,
-            ROUND(ds.total_ng::numeric * 100 / NULLIF(ds.total_ok + ds.total_ng, 0), 2) AS ng_ratio_percent
-        FROM (
-            SELECT
-                prodid,
-                prodlot,
-                SUM(totalok) AS total_ok,
-                SUM(totalng) AS total_ng
-            FROM defectsummary
-            GROUP BY prodid, prodlot
-        ) ds
-        INNER JOIN (
-            SELECT DISTINCT pd.prodid, p.prodname, pd.cameraid
-            FROM productdefectresult pd
-            LEFT JOIN product p on p.prodid = pd.prodid
-            WHERE pd.defecttime BETWEEN :start AND :end
-        ) p ON ds.prodid = p.prodid
-        """
-        return db.execute(text(sql), {
-            "start": start,
-            "end": end,
-            "prodlot": prodline,
-            "productname": productname,
-            "cameraid": cameraid
-        }).mappings().fetchall()
-
-    @staticmethod
-    def ng_distribution(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
-        sql = """
-            SELECT 
-                d.defecttype,
-                p.prodname,
-                ds.prodlot as line,
-                DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
-                COUNT(*) AS defect_count
-            FROM productdefectresult pdr
-              LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid
-              LEFT JOIN product p ON p.prodid = pdr.prodid 
-              LEFT JOIN defecttype d on d.defectid = pdr.defectid
-            WHERE pdr.defecttime BETWEEN :start AND :end
-              AND (:productname IS NULL OR p.prodname = :productname)
-              AND (:prodline IS NULL OR ds.prodlot = :prodline)
-              AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
-            GROUP BY d.defecttype, hour_slot, p.prodname, ds.prodlot
-            ORDER BY hour_slot, d.defecttype;
-        """
-        return db.execute(text(sql), {
-            "start": start,
-            "end": end,
-            "productname": productname,
-            "prodline": prodline,
-            "cameraid": cameraid
-        }).mappings().fetchall()
-
-    @staticmethod
-    def top_5_defects(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
-        sql = """
-        SELECT
-            d.defecttype,
-            ds.prodlot AS line,
-            COUNT(*) AS quantity,
-            ARRAY_AGG(pdr.defecttime ORDER BY pdr.defecttime) AS all_defect_times
-        FROM productdefectresult pdr
-        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
-        LEFT JOIN product p ON p.prodid = pdr.prodid 
-        LEFT JOIN defecttype d on d.defectid = pdr.defectid
-            WHERE pdr.defecttime BETWEEN :start AND :end
-              AND (:productname IS NULL OR p.prodname = :productname)
-              AND (:prodlot IS NULL OR ds.prodlot = :prodlot)
-              AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
-            GROUP BY d.defecttype, ds.prodlot
-            ORDER BY quantity DESC
-            LIMIT 5;
-        """
-        return db.execute(text(sql), {
-            "start": start,
-            "end": end,
-            "prodlot": prodline,
-            "productname": productname,
-            "cameraid": cameraid
-        }).mappings().fetchall()
-
-    @staticmethod
-    def top_5_trends(start: datetime, end: datetime, db: Session):
-        sql = """
-        SELECT 
-            d.defecttype,
-            ds.prodlot as line,
-            DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
-            COUNT(*) AS quantity
-        FROM productdefectresult pdr
-	        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
-	        LEFT JOIN defecttype d on d.defectid = pdr.defectid
-        WHERE pdr.defecttime BETWEEN :start AND :end
-	        AND d.defecttype IN (
-	            SELECT d2.defecttype
-	            FROM productdefectresult pdr2
-		            LEFT JOIN defectsummary ds2 ON pdr2.prodid = ds2.prodid 
-		            LEFT JOIN defecttype d2 on d2.defectid = pdr2.defectid
-	            WHERE pdr2.defecttime BETWEEN :start AND :end
-	            GROUP BY d2.defecttype
-	            ORDER BY COUNT(*) DESC
-	            LIMIT 5
-	        )
-        GROUP BY d.defecttype, hour_slot, ds.prodlot
-        ORDER BY hour_slot, d.defecttype;
-        """
-        result = db.execute(text(sql), {
-            "start": start,
-            "end": end
-        }).mappings().fetchall()
-        return result
     
+
     @staticmethod
-    def get_total_products(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], cameraid: Optional[str], db: Session):
+    def _convert_month_to_name(month_str: Optional[str]) -> Optional[str]:
+        """แปลง month number ('05') เป็น month name ('May')"""
+        if not month_str:
+            return None
+        
+        month_mapping = {
+            '01': 'January', '02': 'February', '03': 'March',
+            '04': 'April', '05': 'May', '06': 'June',
+            '07': 'July', '08': 'August', '09': 'September',
+            '10': 'October', '11': 'November', '12': 'December'
+        }
+        return month_mapping.get(month_str)
+
+
+    @staticmethod
+    def get_total_products(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], 
+                          cameraid: Optional[str], month: Optional[str], year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
         sql = """
-        SELECT 
-            COUNT(DISTINCT pdr.prodid) as total_products
-        FROM productdefectresult pdr
-        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid
-        LEFT JOIN product p ON p.prodid = pdr.prodid 
-        WHERE pdr.defecttime BETWEEN :start AND :end
-          AND (:productname IS NULL OR p.prodname = :productname)
-          AND (:prodline IS NULL OR ds.prodlot = :prodline)
-          AND (:cameraid IS NULL OR pdr.cameraid = :cameraid)
+        select
+            count(distinct p.prodid) as total_products
+        from
+            productdefectresult p
+        left join planning pl
+        on
+            p.prodid = pl.prodid
+        where
+            (:prodid IS NULL OR p.prodid = :prodid)
+            and (:cameraid IS NULL OR p.cameraid = :cameraid)
+            and (:prodline IS NULL OR pl.prodline = :prodline)
+            and ((p.defecttime between :startdatetime and :enddatetime)
+                or ((TO_CHAR(p.defecttime, 'FMMonth') ilike :month)
+                    AND (extract(year from p.defecttime) = :year))
+            )
         """
+        
         result = db.execute(text(sql), {
-            "start": start,
-            "end": end,
+            "prodid": productname,
+            "cameraid": cameraid,
             "prodline": prodline,
-            "productname": productname,
-            "cameraid": cameraid
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
         }).mappings().fetchone()
         
-        # Return ในรูปแบบ array เพื่อให้ตรงกับ frontend expectation
         return [{"total_products": result["total_products"] if result else 0}]
-    
-    @staticmethod
-    def get_lines_list(db: Session):
-        """ดึงรายการ production lines สำหรับ dropdown filter"""
-        sql = """
-        SELECT DISTINCT 
-            ds.prodlot as id,
-            ds.prodlot as name
-        FROM public.defectsummary ds
-        WHERE ds.prodlot IS NOT NULL 
-        ORDER BY ds.prodlot
-        """
-        result = db.execute(text(sql)).mappings().fetchall()
-        return [{"id": row["id"], "name": row["name"]} for row in result]
 
+    # Card 2: OK/NG Ratio
+    @staticmethod
+    def get_ratio(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], 
+                  cameraid: Optional[str], month: Optional[str], year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
+        sql = """
+        select
+            z.status,
+            COUNT(*),
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) over (), 2) as percent_of_total
+        from
+            (
+            select
+                pr.defecttime,
+                pr.prodid,
+                p.prodname,
+                pr.prodseq,
+                pr.cameraid,
+                pr.imagepath,
+                case
+                    when BOOL_OR(pr.prodstatus = 'NG') then 'NG'
+                    else 'OK'
+                end as status,
+                CONCAT_WS(E'\\n',
+                    CONCAT('OK - ', STRING_AGG(pr.defectid, ', ' order by pr.resultid) filter (where pr.prodstatus = 'OK')),
+                    CONCAT('NG - ', STRING_AGG(pr.defectid, ', ' order by pr.resultid) filter (where pr.prodstatus = 'NG'))
+                ) as defect_summary,
+                STRING_AGG(pr.comment, ', ' order by pr.resultid) as comment
+            from
+                productdefectresult pr
+            left join product p on
+                p.prodid = pr.prodid
+            left join planning pl on
+                pl.prodid = pr.prodid
+            where
+                (:prodid IS NULL OR p.prodid = :prodid)
+                and (:cameraid IS NULL OR pr.cameraid = :cameraid)
+                and (:prodline IS NULL OR pl.prodline = :prodline)
+                and (
+                    (pr.defecttime between :startdatetime and :enddatetime)
+                    or (
+                        TO_CHAR(pr.defecttime, 'FMMonth') ilike :month
+                        AND extract(year from pr.defecttime) = :year
+                    )
+                )
+            group by
+                pr.cameraid,
+                pr.prodid,
+                p.prodname,
+                pr.prodseq,
+                pr.defecttime,
+                pr.imagepath
+        ) z
+        group by
+            z.status
+        """
+        
+        result = db.execute(text(sql), {
+            "prodid": productname,
+            "cameraid": cameraid,
+            "prodline": prodline,
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
+        }).mappings().fetchall()
+        
+
+        ok_data = next((row for row in result if row["status"] == "OK"), None)
+        ng_data = next((row for row in result if row["status"] == "NG"), None)
+        
+        return [{
+            "prodname": productname or "All Products",
+            "cameraid": cameraid or "All Cameras",
+            "prodlot": prodline or "All Lines",
+            "line": prodline or "All Lines",
+            "total_ok": ok_data["count"] if ok_data else 0,
+            "total_ng": ng_data["count"] if ng_data else 0,
+            "ok_ratio_percent": ok_data["percent_of_total"] if ok_data else 0,
+            "ng_ratio_percent": ng_data["percent_of_total"] if ng_data else 0
+        }]
+
+    # Card 3: Trend of Top 5 Defect Types
+    @staticmethod
+    def top_5_trends(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], 
+                     cameraid: Optional[str], month: Optional[str], year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
+        sql = """
+        select
+            defectid,
+            DATE_TRUNC('hour', defecttime) as hour_group,
+            COUNT(*) as ng_count
+        from
+            productdefectresult pr
+        left join planning pl on
+            pl.prodid = pr.prodid
+        where
+            pr.prodstatus = 'NG'
+            and (:cameraid IS NULL OR pr.cameraid = :cameraid)
+            and (:prodid IS NULL OR pr.prodid = :prodid)
+            and (:prodline IS NULL OR pl.prodline = :prodline)
+            and (
+                pr.defecttime between :startdatetime and :enddatetime
+                or (
+                    TO_CHAR(pr.defecttime, 'FMMonth') ilike :month
+                    AND extract(year from pr.defecttime) = :year
+                )
+            )
+            and pr.defectid in (
+            select
+                defectid
+            from
+                (
+                select
+                    defectid,
+                    COUNT(*) as cnt
+                from
+                    productdefectresult pr2
+                left join planning pl2 on
+                    pl2.prodid = pr2.prodid
+                where
+                    pr2.prodstatus = 'NG'
+                    and (:cameraid IS NULL OR pr2.cameraid = :cameraid)
+                    and (:prodid IS NULL OR pr2.prodid = :prodid)
+                    and (:prodline IS NULL OR pl2.prodline = :prodline)
+                    and (
+                        pr2.defecttime between :startdatetime and :enddatetime
+                        or (
+                            TO_CHAR(pr2.defecttime, 'FMMonth') ilike :month
+                            AND extract(year from pr2.defecttime) = :year
+                        )
+                    )
+                group by
+                    defectid
+                order by
+                    cnt desc
+                limit 5
+                ) as top5
+            )
+        group by
+            defectid,
+            hour_group
+        order by
+            defectid,
+            hour_group
+        """
+        
+        result = db.execute(text(sql), {
+            "prodid": productname,
+            "cameraid": cameraid,
+            "prodline": prodline,
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
+        }).mappings().fetchall()
+        
+        return [{"defecttype": row["defectid"], "line": prodline or "All Lines", 
+                "hour_slot": row["hour_group"].isoformat() if row["hour_group"] else "", 
+                "quantity": row["ng_count"]} for row in result]
+
+    # Card 4: Top 5 Most Frequent Defect Types
+    @staticmethod
+    def top_5_defects(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], 
+                      cameraid: Optional[str], month: Optional[str], year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
+        sql = """
+        select
+            defectid,
+            pl.prodline,
+            COUNT(*) as ng_count
+        from
+            productdefectresult pr
+        left join planning pl on
+            pl.prodid = pr.prodid
+        where
+            pr.prodstatus = 'NG'
+            and (:cameraid IS NULL OR pr.cameraid = :cameraid)
+            and (:prodid IS NULL OR pr.prodid = :prodid)
+            and (:prodline IS NULL OR pl.prodline = :prodline)
+            and (
+                pr.defecttime between :startdatetime and :enddatetime
+                or (
+                    TO_CHAR(pr.defecttime, 'FMMonth') ilike :month
+                    or extract(year from pr.defecttime) = :year
+                )
+            )
+            and pr.defectid in (
+            select
+                defectid
+            from
+                (
+                select
+                    defectid,
+                    COUNT(*) as cnt
+                from
+                    productdefectresult pr2
+                left join planning pl2 on
+                    pl2.prodid = pr2.prodid
+                where
+                    pr2.prodstatus = 'NG'
+                    and (:cameraid IS NULL OR pr2.cameraid = :cameraid)
+                    and (:prodid IS NULL OR pr2.prodid = :prodid)
+                    and (:prodline IS NULL OR pl2.prodline = :prodline)
+                    and (
+                        pr2.defecttime between :startdatetime and :enddatetime
+                        or (
+                            TO_CHAR(pr2.defecttime, 'FMMonth') ilike :month
+                            or extract(year from pr2.defecttime) = :year
+                        )
+                    )
+                group by
+                    defectid
+                order by
+                    cnt desc
+                limit 5
+                ) as top5
+            )
+        group by
+            defectid,
+            pl.prodline
+        order by
+            defectid,
+            pl.prodline
+        """
+        
+        result = db.execute(text(sql), {
+            "prodid": productname,
+            "cameraid": cameraid,
+            "prodline": prodline,
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
+        }).mappings().fetchall()
+        
+        return [{"defecttype": row["defectid"], "line": row["prodline"] or "Unknown", 
+                "quantity": row["ng_count"], "all_defect_times": []} for row in result]
+    
+    # Card 5: Defect Distribution by Hour
+    @staticmethod
+    def ng_distribution(start: datetime, end: datetime, productname: Optional[str], prodline: Optional[str], 
+                        cameraid: Optional[str], month: Optional[str], year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
+        sql = """
+        select
+            pr.prodid as prodid,
+            p.prodname,
+            DATE_TRUNC('hour', pr.defecttime) as hour_group,
+            COUNT(*) as ng_count
+        from
+            productdefectresult pr
+        left join planning pl on
+            pl.prodid = pr.prodid
+        left join product p on
+            pl.prodid = p.prodid
+        where
+            pr.prodstatus = 'NG'
+            and (:cameraid IS NULL OR pr.cameraid = :cameraid)
+            and (:prodid IS NULL OR pr.prodid = :prodid)
+            and (:prodline IS NULL OR pl.prodline = :prodline)
+            and (
+                pr.defecttime between :startdatetime and :enddatetime
+                or (
+                    TO_CHAR(pr.defecttime, 'FMMonth') ilike :month
+                    AND extract(year from pr.defecttime) = :year
+                )
+            )
+            and pr.defectid in (
+            select
+                defectid
+            from
+                (
+                select
+                    defectid,
+                    COUNT(*) as cnt
+                from
+                    productdefectresult pr2
+                left join planning pl2 on
+                    pl2.prodid = pr2.prodid
+                where
+                    pr2.prodstatus = 'NG'
+                    and (:cameraid IS NULL OR pr2.cameraid = :cameraid)
+                    and (:prodid IS NULL OR pr2.prodid = :prodid)
+                    and (:prodline IS NULL OR pl2.prodline = :prodline)
+                    and (
+                        pr2.defecttime between :startdatetime and :enddatetime
+                        or (
+                            TO_CHAR(pr2.defecttime, 'FMMonth') ilike :month
+                            AND extract(year from pr2.defecttime) = :year
+                        )
+                    )
+                group by
+                    defectid
+                order by
+                    cnt desc
+                limit 5
+                ) as top5
+            )
+        group by
+            pr.prodid,
+            p.prodname,
+            hour_group
+        order by
+            pr.prodid,
+            hour_group
+        """
+        
+        result = db.execute(text(sql), {
+            "prodid": productname,
+            "cameraid": cameraid,
+            "prodline": prodline,
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
+        }).mappings().fetchall()
+        
+        return [{
+            "defecttype": row["prodid"] or "Unknown",
+            "prodname": row["prodname"] or "Unknown",
+            "line": prodline or "All Lines",
+            "hour_slot": row["hour_group"].isoformat() if row["hour_group"] else "",
+            "defect_count": row["ng_count"]
+        } for row in result]
+
+
+
+    # Card 6: Trend of Top 5 Detection
+    @staticmethod
+    def get_defects_with_ng_gt_zero(start: datetime, end: datetime, productname: Optional[str], 
+                                    prodline: Optional[str], cameraid: Optional[str], month: Optional[str], 
+                                    year: Optional[str], db: Session):
+        month_name = DashboardService._convert_month_to_name(month)
+        
+        sql = """
+        SELECT
+            pr.cameraid,
+            pr.defectid,
+            COUNT(*) as totalng
+        FROM productdefectresult pr
+        LEFT JOIN planning pl ON pl.prodid = pr.prodid
+        LEFT JOIN cameramodelprodapplied cm ON cm.cameraid = pr.cameraid AND cm.prodid = pr.prodid
+        WHERE pr.prodstatus = 'NG'
+        AND (:productname IS NULL OR pr.prodid = :productname)
+        AND (:prodline IS NULL OR pl.prodline = :prodline)
+        AND (:cameraid IS NULL OR pr.cameraid = :cameraid)
+        AND (
+            (pr.defecttime BETWEEN :startdatetime AND :enddatetime)
+            OR (
+                (:month IS NULL OR TO_CHAR(pr.defecttime, 'FMMonth') ILIKE :month)
+                AND (:year IS NULL OR EXTRACT(year FROM pr.defecttime) = :year)
+            )
+        )
+        GROUP BY pr.cameraid, pr.defectid
+        ORDER BY totalng DESC
+        LIMIT 5
+        """
+        
+        result = db.execute(text(sql), {
+            "productname": productname,
+            "prodline": prodline,
+            "cameraid": cameraid,
+            "startdatetime": start,
+            "enddatetime": end,
+            "month": month_name,
+            "year": int(year) if year else None
+        }).mappings().fetchall()
+        
+        return [{
+            "prodid": productname or "All",
+            "defectid": row["defectid"] or "Unknown",
+            "defecttype": row["defectid"] or "Unknown",
+            "cameraid": row["cameraid"],
+            "line": prodline or "Unknown",
+            "cameraname": row["cameraid"],
+            "totalng": row["totalng"],
+            "defecttime": start.isoformat()
+        } for row in result]
+
+
+    # Dropdown Lists
     @staticmethod
     def get_products_list(db: Session):
-        """ดึงรายการ products สำหรับ dropdown filter"""
         sql = """
         SELECT DISTINCT 
-            p.prodname as id,
-            p.prodname as name
+            p.prodid as id,
+            p.prodid as name
         FROM productdefectresult pdr
         LEFT JOIN product p ON p.prodid = pdr.prodid 
-        WHERE p.prodname IS NOT NULL 
-        ORDER BY p.prodname
+        WHERE p.prodid IS NOT NULL 
+        ORDER BY p.prodid
         """
         result = db.execute(text(sql)).mappings().fetchall()
         return [{"id": row["id"], "name": row["name"]} for row in result]
@@ -213,42 +464,24 @@ class DashboardService:
         sql = """
         SELECT DISTINCT 
             c.cameraid as id,
-            COALESCE(c.cameraname, c.cameraid) as name
-        FROM public.camera c
+            c.cameraid as name
+        FROM camera c
         WHERE c.cameraid IS NOT NULL 
         ORDER BY c.cameraid
         """
         result = db.execute(text(sql)).mappings().fetchall()
         return [{"id": row["id"], "name": row["name"]} for row in result]
-    # ----------------------------------------------------------------------------------
-    
+
     @staticmethod
-    def test_top_5_trends(filter: schemas.DashboardFilter, db: Session):
+    def get_lines_list(db: Session):
+        """ดึงรายการ production lines สำหรับ dropdown filter"""
         sql = """
-        SELECT 
-            d.defecttype,
-            ds.prodlot as line,
-            DATE_TRUNC('hour', pdr.defecttime) AS hour_slot,
-            COUNT(*) AS quantity
-        FROM productdefectresult pdr
-        LEFT JOIN defectsummary ds ON pdr.prodid = ds.prodid 
-        LEFT JOIN defecttype d on d.defectid = pdr.defectid
-        WHERE pdr.defecttime BETWEEN :start AND :end
-        AND d.defecttype IN (
-            SELECT pdr2.defecttype
-            FROM productdefectresult pdr2
-            LEFT JOIN defectsummary ds2 ON pdr2.prodid = ds2.prodid 
-            LEFT JOIN defecttype d2 on d2.defectid = pdr2.defectid
-            WHERE d2.defecttime BETWEEN :start AND :end
-            GROUP BY d2.defecttype
-            ORDER BY COUNT(*) DESC
-            LIMIT 5
-        )
-        GROUP BY d.defecttype, hour_slot, ds.prodlot
-        ORDER BY hour_slot, d.defecttype;
+        SELECT DISTINCT 
+            pl.prodline as id,
+            pl.prodline as name
+        FROM planning pl
+        WHERE pl.prodline IS NOT NULL 
+        ORDER BY pl.prodline
         """
-        result = db.execute(text(sql), {
-            "start": filter.start,
-            "end": filter.end
-        }).mappings().fetchall()
-        return result
+        result = db.execute(text(sql)).mappings().fetchall()
+        return [{"id": row["id"], "name": row["name"]} for row in result]

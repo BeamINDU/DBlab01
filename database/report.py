@@ -44,53 +44,59 @@ class ReportDB:
         params = {}
 
         allowed_order_fields = [ "defecttime", "prodid", "prodname", "prodseq", "cameraid", "cameraname", "prodstatus", "defectdetail" ]
-
         order_by = model.order_by if model.order_by in allowed_order_fields else "defecttime"
-        order_dir = "DESC" if model.order_dir.lower() == "desc" else "ASC"
+        order_dir = "DESC" if str(model.order_dir).lower() == "desc" else "ASC"
 
-        # --- Filters (WHERE) ---
-        if model.startdate:
-            where_filters.append("pr.defecttime >= :startdate")
-            params["startdate"] = model.startdate
+        # --- Helper for filters ---
+        def add_where(condition, key, value):
+            if value is not None:
+                where_filters.append(condition)
+                params[key] = value
 
-        if model.enddate:
-            where_filters.append("pr.defecttime <= :enddate")
-            params["enddate"] = model.enddate
+        def add_having(condition, key, value):
+            if value is not None:
+                having_filters.append(condition)
+                params[key] = value
 
-        if model.prodid:
-            where_filters.append("pr.prodid ILIKE :prodid")
-            params["prodid"] = f"%{model.prodid}%"
+        # --- WHERE filters ---
+        add_where("pr.defecttime >= :startdate", "startdate", model.startdate)
+        add_where("pr.defecttime <= :enddate", "enddate", model.enddate)
+        add_where("pr.prodid ILIKE :prodid", "prodid", f"%{model.prodid}%" if model.prodid else None)
+        add_where("p.prodname ILIKE :prodname", "prodname", f"%{model.prodname}%" if model.prodname else None)
+        add_where("pr.cameraid ILIKE :cameraid", "cameraid", f"%{model.cameraid}%" if model.cameraid else None)
+        add_where("c.cameraname ILIKE :cameraname", "cameraname", f"%{model.cameraname}%" if model.cameraname else None)
 
-        if model.prodname:
-            where_filters.append("p.prodname ILIKE :prodname")
-            params["prodname"] = f"%{model.prodname}%"
+        # --- HAVING filters ---
+        add_having("CASE WHEN BOOL_OR(pr.prodstatus = 'NG') THEN 'NG' ELSE 'OK' END = :prodstatus", "prodstatus", model.prodstatus)
+        add_having("STRING_AGG(d.defecttype, ', ' ORDER BY d.defecttype) ILIKE :defecttype", "defecttype", f"%{model.defecttype}%" if model.defecttype else None)
 
-        if model.cameraid:
-            where_filters.append("pr.cameraid ILIKE :cameraid")
-            params["cameraid"] = f"%{model.cameraid}%"
-
-        if model.cameraname:
-            where_filters.append("c.cameraname ILIKE :cameraname")
-            params["cameraname"] = f"%{model.cameraname}%"
-
-        # --- Filters (HAVING) ---
-        if model.prodstatus:
-            having_filters.append("CASE WHEN BOOL_OR(pr.prodstatus = 'NG') THEN 'NG' ELSE 'OK' END = :prodstatus")
-            params["prodstatus"] = model.prodstatus
-
-        if model.defecttype:
-            having_filters.append("STRING_AGG(d.defecttype, ', ' ORDER BY d.defecttype) ILIKE :defecttype")
-            params["defecttype"] = f"%{model.defecttype}%"
-
-        where_clause = "WHERE " + " AND ".join(where_filters) if where_filters else ""
-        having_clause = "HAVING " + " AND ".join(having_filters) if having_filters else ""
+        where_clause = f"WHERE {' AND '.join(where_filters)}" if where_filters else ""
+        having_clause = f"HAVING {' AND '.join(having_filters)}" if having_filters else ""
 
         # --- Pagination ---
-        page = model.page or 1
-        page_size = model.pageSize or 10
+        page = max(model.page or 1, 1)
+        page_size = min(max(model.pageSize or 10, 1), 100)
         offset = (page - 1) * page_size
+        params["limit"] = page_size
+        params["offset"] = offset
 
-        # --- Main Query (with LIMIT) ---
+        group_by_clause = """
+            GROUP BY 
+                pr.cameraid, c.cameraname, pr.prodid, p.prodname,
+                pr.prodseq, pr.defecttime, pr.imagepath
+        """
+
+        base_select = f"""
+            FROM productdefectresult pr
+            LEFT JOIN product p ON p.prodid = pr.prodid
+            LEFT JOIN camera c ON c.cameraid = pr.cameraid
+            LEFT JOIN defecttype d ON d.defectid = pr.defectid
+            {where_clause}
+            {group_by_clause}
+            {having_clause}
+        """
+
+        # --- Main Query ---
         main_query = f"""
             SELECT *
             FROM (
@@ -106,36 +112,20 @@ class ReportDB:
                     CASE WHEN BOOL_OR(pr.prodstatus = 'NG') THEN 'NG' ELSE 'OK' END AS prodstatus,
                     STRING_AGG(d.defecttype, ', ' ORDER BY d.defecttype) AS defectdetail,
                     STRING_AGG(pr.comment, ', ' ORDER BY pr.resultid) AS comment
-                FROM productdefectresult pr
-                LEFT JOIN product p ON p.prodid = pr.prodid
-                LEFT JOIN camera c ON c.cameraid = pr.cameraid
-                LEFT JOIN defecttype d ON d.defectid = pr.defectid
-                {where_clause}
-                GROUP BY pr.cameraid, c.cameraname, pr.prodid, p.prodname, pr.prodseq, pr.defecttime, pr.imagepath
-                {having_clause}
+                {base_select}
             ) AS subquery
             ORDER BY {order_by} {order_dir}
             LIMIT :limit OFFSET :offset
         """
 
-        params["limit"] = page_size
-        params["offset"] = offset
-
-        # --- Total Count Query ---
+        # --- Count Query ---
         count_query = f"""
-            SELECT COUNT(*) FROM (
+            SELECT COUNT(*) AS count
+            FROM (
                 SELECT 1
-                FROM productdefectresult pr
-                LEFT JOIN product p ON p.prodid = pr.prodid
-                LEFT JOIN camera c ON c.cameraid = pr.cameraid
-                LEFT JOIN defecttype d on d.defectid = pr.defectid
-                {where_clause}
-                GROUP BY pr.cameraid, c.cameraname, pr.prodid, p.prodname, pr.prodseq, pr.defecttime, pr.imagepath
-                {having_clause}
+                {base_select}
             ) AS count
         """
-        # print("SQL Query:", main_query)
-        # print("Parameters:", params)
 
         total = self._fetch_one(count_query, params)["count"]
         items = self._fetch_all(main_query, params)
@@ -330,66 +320,69 @@ class ReportDB:
         where_filters = []
         params = {}
 
+        # --- Allowed fields for ORDER BY ---
         allowed_order_fields = [ "prodlot", "prodid", "prodname", "defectid", "defecttype", "totalprod", "totalok", "totalng" ]
-
         order_by = model.order_by if model.order_by in allowed_order_fields else "prodlot"
-        order_dir = "DESC" if model.order_dir.lower() == "desc" else "ASC"
-        
-        # --- Filters (WHERE) ---
-        if model.prodlot:
-            where_filters.append("ds.prodlot ILIKE :prodlot")
-            params["prodlot"] = f"%{model.prodlot}%"
+        order_dir = "DESC" if str(model.order_dir).lower() == "desc" else "ASC"
 
-        if model.prodid:
-            where_filters.append("ds.prodid ILIKE :prodid")
-            params["prodid"] = f"%{model.prodid}%"
+        # --- Helper to build filters ---
+        def add_filter(condition, key, value):
+            if value is not None:
+                where_filters.append(condition)
+                params[key] = value
 
-        if model.prodname:
-            where_filters.append("p.prodname ILIKE :prodname")
-            params["prodname"] = f"%{model.prodname}%"
+        # --- WHERE Filters ---
+        add_filter("ds.prodlot ILIKE :prodlot", "prodlot", f"%{model.prodlot}%" if model.prodlot else None)
+        add_filter("ds.prodid ILIKE :prodid", "prodid", f"%{model.prodid}%" if model.prodid else None)
+        add_filter("p.prodname ILIKE :prodname", "prodname", f"%{model.prodname}%" if model.prodname else None)
+        add_filter("ds.defectid ILIKE :defectid", "defectid", f"%{model.defectid}%" if model.defectid else None)
+        add_filter("d.defecttype ILIKE :defecttype", "defecttype", f"%{model.defecttype}%" if model.defecttype else None)
 
-        if model.defectid:
-            where_filters.append("ds.defectid ILIKE :defectid")
-            params["defectid"] = f"%{model.defectid}%"
-
-        if model.defecttype:
-            where_filters.append("d.defecttype ILIKE :defecttype")
-            params["defecttype"] = f"%{model.defecttype}%"
-
-        where_clause = " WHERE " + " AND ".join(where_filters) if where_filters else ""
+        where_clause = f"WHERE {' AND '.join(where_filters)}" if where_filters else ""
 
         # --- Pagination ---
-        page = model.page or 1
-        page_size = model.pageSize or 10
+        page = max(model.page or 1, 1)
+        page_size = min(max(model.pageSize or 10, 1), 100)
         offset = (page - 1) * page_size
+        params["limit"] = page_size
+        params["offset"] = offset
 
-        # --- Main Query (with LIMIT) ---
-        main_query = f"""
-            SELECT ds.summaryid, ds.prodlot, ds.prodid, p.prodname, ds.defectid, d.defecttype, ds.totalprod, ds.totalok, ds.totalng
+        # --- Base FROM clause ---
+        base_from = """
             FROM defectsummary ds
-            left JOIN product p ON p.prodid = ds.prodid 
-            left JOIN defecttype d on d.defectid = ds.defectid
+            LEFT JOIN product p ON p.prodid = ds.prodid
+            LEFT JOIN defecttype d ON d.defectid = ds.defectid
+        """
+
+        # --- Main Query ---
+        main_query = f"""
+            SELECT
+                ds.summaryid,
+                ds.prodlot,
+                ds.prodid,
+                p.prodname,
+                ds.defectid,
+                d.defecttype,
+                ds.totalprod,
+                ds.totalok,
+                ds.totalng
+            {base_from}
             {where_clause}
             ORDER BY {order_by} {order_dir}
             LIMIT :limit OFFSET :offset
         """
 
-        params["limit"] = page_size
-        params["offset"] = offset
-
-        # --- Total Count Query ---
+        # --- Count Query ---
         count_query = f"""
-            SELECT COUNT(*) FROM (
+            SELECT COUNT(*) AS count
+            FROM (
                 SELECT 1
-                FROM defectsummary ds
-                left JOIN product p ON p.prodid = ds.prodid 
-                left JOIN defecttype d on d.defectid = ds.defectid
+                {base_from}
                 {where_clause}
             ) AS count
         """
-        # print("SQL Query:", main_query)
-        # print("Parameters:", params)
-        
+
+        # --- Execute Queries ---
         total = self._fetch_one(count_query, params)["count"]
         items = self._fetch_all(main_query, params)
 
@@ -397,7 +390,7 @@ class ReportDB:
             "total": total,
             "items": items
         }
-    
+ 
     def suggest_defect_lotno(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT prodlot FROM defectsummary
