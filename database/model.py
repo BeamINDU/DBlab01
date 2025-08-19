@@ -10,10 +10,16 @@ from typing import Optional, Union, Dict, Any, List
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import base64
 import json
+import asyncio
+import websockets
+from datetime import datetime
+from sqlalchemy import text
+from dotenv import load_dotenv
 
 app = FastAPI()
+
+WS = os.getenv("WS", "ws://127.0.0.1:8010")
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -22,12 +28,6 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 UPLOAD_FOLDER = "dataset" 
-
-# Case
-# 1. ถ้า add new model, status = Processing
-# ถ้า edit version ที่มีอยู่แล้ว จะต้องส้ราง version ใหม่ (version ใหม่ status = Processing)
-# ถ้าตอน step 4 กด Finish ใช้ version ใหม่ที่เพิ่งสร้าง อันใหม่ status = Using และ version เก่า update status=Ready
-# ถ้าเทรน version ใหม่ แต่ไม่ใช้ ไปใช้ version เก่า status อันที่ทำอยู่ = Ready, version ที่ใช้ = Using
 
 class DetectionModelDB:
     def _fetch_one(self, query: str, params: dict):
@@ -158,6 +158,10 @@ class DetectionModelDB:
       return version_list
 
 class DetectionModelService:
+    async def send_ws_message(url: str, modelversionid: int):
+      async with websockets.connect(url) as websocket:
+          await websocket.send(json.dumps({"modelversionid": modelversionid}))
+
     @staticmethod
     def update_labelclass(modelversionid: int, models: List[schemas.LabelClassUpdate], db: Session):
         inserted_or_updated = []
@@ -715,11 +719,13 @@ class DetectionModelService:
         # Update 'modelversion'
         db.execute(text("""
             UPDATE modelversion
-            SET currentstep = :currentstep,
+            SET modelstatus = :modelstatus,
+                currentstep = :currentstep,
                 updatedby = :updatedby,
                 updateddate = :updateddate
             WHERE modelversionid = :modelversionid
         """), {
+            "modelstatus": 'Training',
             "currentstep": 3,
             "updatedby": model.updatedby,
             "updateddate": now,
@@ -727,6 +733,14 @@ class DetectionModelService:
         })
         
         db.commit()
+
+        # ส่ง WebSocket
+        ws_url = f"{WS}/training-action/{modelversionid}"
+        try:
+            asyncio.run(DetectionModelService().send_ws_message(ws_url, modelversionid))
+        except Exception as e:
+            print(f"[WebSocket Error] {e}")
+
         return success_response(200, {"modelversionid": modelversionid })
 
     @staticmethod
@@ -736,13 +750,13 @@ class DetectionModelService:
       # Update 'currentstep'
       db.execute(text("""
           UPDATE modelversion
-          SET modelstatus = :modelversion,
+          SET modelstatus = :modelstatus,
               currentstep = :currentstep,
               updatedby = :updatedby,
               updateddate = :updateddate
           WHERE modelversionid = :modelversionid
       """), {
-          "modelversion": 'Ready',
+          "modelstatus": 'Ready',
           "currentstep": 4,
           "updatedby": model.updatedby,
           "updateddate": now,
@@ -775,19 +789,29 @@ class DetectionModelService:
                 annotate_data = annotate
 
             if imageid is None and file is not None:
-                # Insert new image
+                # Generate timestamp for unique filename
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                # Create new filename with timestamp
+                original_filename = file.filename
+                stem, ext = os.path.splitext(original_filename)
+                new_filename = f"{stem}_{timestamp}{ext}"
+
+                # Create folder if not exists
                 folder = f"{modelid}/{modelversionid}"
                 folder_path = Path(UPLOAD_FOLDER) / folder
                 folder_path.mkdir(parents=True, exist_ok=True)
 
-                file_path = folder_path / file.filename
+                # Full path for saving file
+                file_path = folder_path / new_filename
 
                 with file_path.open("wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
 
-                imagepath = f"{folder}/{file.filename}"
+                imagepath = f"{folder}/{new_filename}"
                 fullpath = str(file_path.resolve())
 
+                # Insert image metadata to DB
                 result = db.execute(text("""
                     INSERT INTO image (
                         modelversionid, imagename, imagepath, annotate, size, width, height
@@ -797,7 +821,7 @@ class DetectionModelService:
                     RETURNING imageid
                 """), {
                     "modelversionid": modelversionid,
-                    "imagename": file.filename,
+                    "imagename": new_filename,
                     "imagepath": imagepath,
                     "annotate": annotate_data,
                     "size": size,
@@ -808,17 +832,16 @@ class DetectionModelService:
 
                 image_data = {
                     "imageid": imageid,
-                    "imagename": file.filename,
+                    "imagename": new_filename,
                     "imagepath": f'dataset/{imagepath}',
                     "fullpath": fullpath,
                     "size": size,
                     "width": width,
                     "height": height,
-                } 
+                }
 
             elif imageid is not None:
-                
-                # Update only annotation
+                # Update annotation only
                 db.execute(text("""
                     UPDATE image
                     SET annotate = :annotate
@@ -828,7 +851,7 @@ class DetectionModelService:
                     "annotate": annotate_data
                 })
 
-                # Select imagename and imagepath for response
+                # Fetch image details for response
                 image_row = db.execute(text("""
                     SELECT imagename, imagepath
                     FROM image
@@ -861,6 +884,8 @@ class DetectionModelService:
             print(f"Error saving file: {e}")
             db.rollback()
             raise e
+
+          
 
     # @staticmethod
     # def upload_base64_image(model: schemas.DetectionModelImage, db: Session):

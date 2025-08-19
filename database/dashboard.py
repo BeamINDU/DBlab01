@@ -399,12 +399,16 @@ class DashboardService:
         
         sql = """
         SELECT
-            pr.cameraid,
+            pr.prodid,
             pr.defectid,
+            pr.cameraid,
+            pr.defecttime,
+            cm.cameraname,
+            pl.prodline as line,
             COUNT(*) as totalng
         FROM productdefectresult pr
         LEFT JOIN planning pl ON pl.prodid = pr.prodid
-        LEFT JOIN cameramodelprodapplied cm ON cm.cameraid = pr.cameraid AND cm.prodid = pr.prodid
+        LEFT JOIN camera cm ON cm.cameraid = pr.cameraid
         WHERE pr.prodstatus = 'NG'
         AND (:productname IS NULL OR pr.prodid = :productname)
         AND (:prodline IS NULL OR pl.prodline = :prodline)
@@ -416,15 +420,20 @@ class DashboardService:
                 AND (:year IS NULL OR EXTRACT(year FROM pr.defecttime) = :year)
             )
         )
-        GROUP BY pr.cameraid, pr.defectid
+        GROUP BY 
+            pr.prodid,
+            pr.defectid, 
+            pr.cameraid,
+            pr.defecttime,
+            cm.cameraname,
+            pl.prodline
         ORDER BY totalng DESC
-        LIMIT 5
         """
         
         result = db.execute(text(sql), {
             "productname": productname,
-            "prodline": prodline,
             "cameraid": cameraid,
+            "prodline": prodline,
             "startdatetime": start,
             "enddatetime": end,
             "month": month_name,
@@ -432,14 +441,14 @@ class DashboardService:
         }).mappings().fetchall()
         
         return [{
-            "prodid": productname or "All",
-            "defectid": row["defectid"] or "Unknown",
-            "defecttype": row["defectid"] or "Unknown",
-            "cameraid": row["cameraid"],
-            "line": prodline or "Unknown",
-            "cameraname": row["cameraid"],
-            "totalng": row["totalng"],
-            "defecttime": start.isoformat()
+            "prodid": row["prodid"] or "Unknown",
+            "defectid": row["defectid"] or "Unknown", 
+            "defecttype": row["defectid"] or "Unknown",  # defecttype = defectid ใน case นี้
+            "cameraid": row["cameraid"] or "Unknown",
+            "line": row["line"] or "All Lines",
+            "cameraname": row["cameraname"] or "Unknown Camera",
+            "totalng": row["totalng"] or 0,
+            "defecttime": row["defecttime"].isoformat() if row["defecttime"] else ""
         } for row in result]
 
 

@@ -1,11 +1,14 @@
 from database.connect_to_db import engine, Session, text, SQLAlchemyError
-from fastapi import HTTPException
 from datetime import datetime
 from fastapi.responses import JSONResponse
 import database.schemas as schemas
 from typing import Union, Dict, Any
 from fastapi import UploadFile
+from fastapi.responses import StreamingResponse
 import pandas as pd
+import io
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 
 def error_response(code: int, message: str):
     return JSONResponse( status_code=code, content={"detail": {"error": message}} )
@@ -17,11 +20,11 @@ class PlanningDB:
     def _fetch_one(self, query: str, params: dict):
         try:
             with engine.connect() as conn:
-              result = conn.execute(text(query), params)
-              return result.mappings().first()
+                result = conn.execute(text(query), params)
+                return result.mappings().first()
         except SQLAlchemyError as e:
             print(f"Database error: {e}")
-            return []
+            return None
 
     def _fetch_all(self, query: str, params: dict = None):
         try:
@@ -113,7 +116,7 @@ class PlanningDB:
             "items": items
         }
 
-    def get_planning(self, model: schemas.PlanningSearch):
+    def get_planning(self, model: schemas.PlanningSearch, pagination: bool = True):
         where_filters = []
         params = {}
 
@@ -139,14 +142,17 @@ class PlanningDB:
         add_filter("p.prodlot ILIKE :prodlot", "prodlot", f"%{model.prodlot}%" if model.prodlot else None)
         add_filter("p.prodline ILIKE :prodline", "prodline", f"%{model.prodline}%" if model.prodline else None)
 
-        where_clause = f"WHERE {' AND '.join(where_filters)}" if where_filters else ""
+        where_clause = f"AND {' AND '.join(where_filters)}" if where_filters else ""
 
         # --- Pagination ---
-        page = max(model.page or 1, 1)
-        page_size = min(max(model.pageSize or 10, 1), 100)
-        offset = (page - 1) * page_size
-        params["limit"] = page_size
-        params["offset"] = offset
+        limit_clause = ""
+        if pagination:
+            page = max(model.page or 1, 1)
+            page_size = min(max(model.pageSize or 10, 1), 100)
+            offset = (page - 1) * page_size
+            limit_clause = "LIMIT :limit OFFSET :offset"
+            params["limit"] = page_size
+            params["offset"] = offset
 
         # --- Base SQL Select ---
         base_select = """
@@ -172,7 +178,7 @@ class PlanningDB:
             {base_select}
             {where_clause}
             ORDER BY {order_by} {order_dir}
-            LIMIT :limit OFFSET :offset
+            {limit_clause}
         """
 
         # --- Count Query ---
@@ -183,14 +189,102 @@ class PlanningDB:
             ) AS subquery
         """
 
+        # print("main_query", main_query)
+
         # --- Execute Queries ---
-        total = self._fetch_one(count_query, params)["count"]
+        total_row = self._fetch_one(count_query, params)
+        total = total_row["count"] if total_row else 0
+
         items = self._fetch_all(main_query, params)
 
         return {
             "total": total,
             "items": items
         }
+
+    def export_planning(self, model: schemas.PlanningSearch):
+      result = self.get_planning(model, pagination=False)
+      items = result["items"]
+
+      df = pd.DataFrame(items, columns=[
+            "planid", "startdatetime", "enddatetime", "actualstartdatetime", "actualenddatetime",
+            "prodid", "prodname", "prodlot", "prodline", "quantity"
+        ])
+
+      # เพิ่มคอลัมน์ลำดับ
+      df.insert(0, "No.", range(1, len(df) + 1))
+
+      # เปลี่ยนชื่อคอลัมน์ให้สวยงาม
+      df.columns = [
+          "No.", "Plan ID", "Plan Startdate", "Plan Enddate", "Actual Startdate", "Actual Enddate",
+          "Product ID", "Product Name", "Lot No", "Line ID", "Quantity"
+      ]
+
+      # แปลงคอลัมน์วันที่เป็น string ป้องกัน error
+      for col in ["Plan Startdate", "Plan Enddate", "Actual Startdate", "Actual Enddate"]:
+          if col in df.columns:
+              df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
+
+      output = io.BytesIO()
+
+      if model.export_type and model.export_type.lower() == "csv":
+          df.to_csv(output, index=False)
+          media_type = "text/csv"
+          filename = "planning.csv"
+      else:
+          with pd.ExcelWriter(output, engine='openpyxl') as writer:
+              sheet_name = "Planning"
+              df.to_excel(writer, index=False, sheet_name=sheet_name)
+              worksheet = writer.sheets[sheet_name]
+
+              # เพิ่มความกว้างของคอลัมน์ตามความยาวข้อความ
+              for i, column in enumerate(df.columns, start=1):
+                  column_letter = get_column_letter(i)
+                  max_length = max(df[column].astype(str).map(len).max(), len(str(column)))
+                  worksheet.column_dimensions[column_letter].width = max_length + 4
+
+              # กรอบเซลล์แบบบาง
+              border = Border(
+                  left=Side(style='thin'), right=Side(style='thin'),
+                  top=Side(style='thin'), bottom=Side(style='thin')
+              )
+
+              # สีพื้นหลังของหัวตาราง
+              header_fill = PatternFill(start_color='FFBCE0FD', end_color='FFBCE0FD', fill_type='solid')
+
+              # ฟอนต์หัวตาราง: ตัวหนา สีดำ
+              header_font = Font(bold=True, color='FF000000')
+
+              # การจัดตำแหน่ง
+              align_center = Alignment(horizontal='center', vertical='center')
+              align_left = Alignment(horizontal='left', vertical='center')
+              align_right = Alignment(horizontal='right', vertical='center')
+
+              # Style header row
+              for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.border = border
+                cell.alignment = align_center
+
+              # Style data rows
+              for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                for cell in row:
+                    cell.border = border
+                    if isinstance(cell.value, (int, float)):
+                        cell.alignment = align_right  # ตัวเลข ชิดขวา
+                    else:
+                        cell.alignment = align_left  # ข้อความ ชิดซ้าย
+
+          media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          filename = "planning.xlsx"
+
+      output.seek(0)
+      return StreamingResponse(
+          output,
+          media_type=media_type,
+          headers={"Content-Disposition": f"attachment; filename={filename}"}
+      )
 
     def suggest_planid(self, q: str):
         rows = self._fetch_all("""
@@ -323,12 +417,12 @@ class PlanningDB:
           set_clause = ", ".join([f"{key} = :{key}" for key in update_fields if key != "update_planid"])
           update_sql = text(f"UPDATE planning SET {set_clause} WHERE planid = :update_planid")
 
-          result = self._fetch_one( "SELECT prodname FROM product WHERE prodid = :prodid", {"prodid": plan.prodid})
-          prodname = result["prodname"] if result else None
+          # result = self._fetch_one( "SELECT prodname FROM product WHERE prodid = :prodid", {"prodid": plan.prodid})
+          # prodname = result["prodname"] if result else None
 
           db.execute(update_sql, update_fields)
           db.commit()
-          return success_response(200, {"planid": update_fields.get("planid", planid), "prodname": prodname, "updateddate": str(now)})
+          return success_response(200, {"planid": update_fields.get("planid", planid), "updateddate": str(now)})
       except Exception as e:
           db.rollback()
           return error_response(500, f"Database error: {str(e)}")
@@ -593,4 +687,3 @@ class PlanningDB:
           db.rollback()
           raise error_response(500, "Failed to upload plan")
 
-    

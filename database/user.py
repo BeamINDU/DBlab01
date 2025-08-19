@@ -14,6 +14,15 @@ def success_response(code: int, content: Union[Dict[str, Any], str]):
     return JSONResponse( status_code=code, content=content)
 
 class UserDB:
+    def _fetch_one(self, query: str, params: dict):
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text(query), params)
+                return result.mappings().first()
+        except SQLAlchemyError as e:
+            print(f"Database error: {e}")
+            return None
+
     def _fetch_all(self, query: str, params: dict = None):
         try:
             with engine.connect() as conn:
@@ -65,6 +74,20 @@ class UserDB:
       
         return self._fetch_all(query, params)
 
+    def get_detail(self, userid: str):
+        query = """
+            SELECT  
+                u.*,
+                COALESCE(array_remove(array_agg(DISTINCT ur.roleid), NULL), '{}') AS roles,
+                COALESCE(string_agg(DISTINCT r.rolename, ','), '') AS rolenames
+            FROM "user" u
+            LEFT JOIN userrole ur ON u.userid = ur.userid
+            LEFT JOIN role r ON ur.roleid = r.roleid
+            WHERE u.userid = :userid
+            GROUP BY u.userid
+        """
+        return self._fetch_one(query, {"userid": userid})
+
     def suggest_userid(self, q: str):
         rows = self._fetch_all("""
             SELECT DISTINCT userid FROM \"user\"
@@ -100,6 +123,7 @@ class UserDB:
       return [{"value": row["fullname"], "label": row["fullname"]} for row in rows]
 
 class UserService:
+    
     @staticmethod
     def add_user(user: schemas.UserCreate, db: Session):
         # Check if user exists
@@ -263,7 +287,8 @@ class UserService:
         update_sql = text(f'UPDATE "user" SET {set_clause} WHERE userid = :update_userid')
 
         # Update userrole
-        if user.roles:
+        rolenames = None
+        if user.roles is not None:
             new_roles = set(user.roles or [])
 
             existing_rows = db.execute(text("""
@@ -273,7 +298,7 @@ class UserService:
 
             to_insert = new_roles - existing_roles
             to_delete = existing_roles - new_roles
-        
+
             for roleid in to_insert:
                 db.execute(text("""
                     INSERT INTO userrole (userid, roleid)
@@ -293,12 +318,17 @@ class UserService:
                 LEFT JOIN role r ON ur.roleid = r.roleid
                 WHERE u.isdeleted = false AND u.userid = :userid
             """), {"userid": user.userid}).fetchone()
+
             rolenames = new_roles.rolenames if new_roles else ''
 
         try:
-          db.execute(update_sql, update_fields)
-          db.commit()
-          return success_response(200, { "userid": update_fields.get("userid", userid), "rolenames": rolenames, "updateddate": str(now)})
+            db.execute(update_sql, update_fields)
+            db.commit()
+            return success_response(200, {
+                "userid": update_fields.get("userid", userid),
+                "rolenames": rolenames,
+                "updateddate": str(now)
+            })
         except Exception as e:
             db.rollback()
             return error_response(500, f"Database error: {str(e)}")

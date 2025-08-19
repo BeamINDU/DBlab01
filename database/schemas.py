@@ -163,6 +163,7 @@ class PlanningSearch(BaseModel):
     pageSize: int = 10
     order_by: Optional[str] = Field(default="prodlot")
     order_dir: Optional[str] = Field(default="asc")
+    export_type: Optional[str] = Field(default=None, alias="exportType")
 
 class PlanningCreate(BaseModel):
     planid: str
@@ -269,6 +270,7 @@ class TransactionSearch(BaseModel):
     pageSize: int = 10
     order_by: Optional[str] = Field(default="startDate")
     order_dir: Optional[str] = Field(default="desc")
+    export_type: Optional[str] = Field(default=None, alias="exportType")
 
 class ReportDefectSearch(BaseModel):
     prodlot: Optional[str] = Field(default=None, alias="lotNo")
@@ -280,6 +282,7 @@ class ReportDefectSearch(BaseModel):
     pageSize: int = 10
     order_by: Optional[str] = Field(default="prodlot")
     order_dir: Optional[str] = Field(default="asc")
+    export_type: Optional[str] = Field(default=None, alias="exportType")
 
 class ReportProductSearch(BaseModel):
     startdate: Optional[datetime] = Field(default=None, alias="dateFrom")
@@ -296,9 +299,7 @@ class ReportProductSearch(BaseModel):
     pageSize: int = 10
     order_by: Optional[str] = Field(default="defecttime")
     order_dir: Optional[str] = Field(default="desc")
-    # order_by: Optional[OrderField] = Field(default="defecttime")
-    # order_dir: Optional[OrderDirection] = Field(default="desc")
-
+    export_type: Optional[str] = Field(default=None, alias="exportType")
 
 class ReportProductSearchDetail(BaseModel):
     id: int
@@ -367,6 +368,11 @@ class ModelAssignmentUpdate(BaseModel):
 class LabelClassUpdate(BaseModel):
     classid: Optional[int] = Field(default=0, alias="id")
     classname: str = Field(alias="name")
+
+class ChangePasswordRequest(BaseModel):
+    userid: str
+    current_password: str
+    new_password: str
 
 class Config:
     orm_mode = True

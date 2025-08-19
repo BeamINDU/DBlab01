@@ -45,7 +45,7 @@ class ModelAssignmentDB:
             filters.append("cmp.appliedstatus = :appliedstatus")
             params["appliedstatus"] = model.appliedstatus
 
-        where_clause = " WHERE " + " AND ".join(filters) if filters else ""
+        where_clause = " AND " + " AND ".join(filters) if filters else ""
 
         query = f"""
             SELECT mv.modelid, mv.modelname, mv.versionno, p.prodname, c.cameraname,  cmp.*
@@ -53,6 +53,7 @@ class ModelAssignmentDB:
             LEFT JOIN modelversion mv ON mv.modelversionid = cmp.modelversionid
             LEFT JOIN product p ON p.prodid = cmp.prodid 
             LEFT JOIN camera c  on c.cameraid = cmp.cameraid
+            WHERE mv.modelstatus in ('Using','Ready')
             {where_clause}
             ORDER BY mv.modelname
         """
@@ -101,7 +102,7 @@ class ModelAssignmentService:
             modelstatus = modelversion_record.modelstatus
             # print("modelstatus", modelstatus)
 
-            if modelstatus != "Using":
+            if modelstatus != "Using" and model.modelversionid != current_modelversionid:
               return error_response(400, "This model is not ready for use.")
 
             # ตรวจสอบ modelversionid
